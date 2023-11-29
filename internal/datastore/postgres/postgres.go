@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -15,9 +16,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/puddle/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/ngrok/sqlmw"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/schollz/progressbar/v3"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
@@ -101,6 +104,28 @@ var (
 	getNow = psql.Select("NOW()")
 
 	tracer = otel.Tracer("spicedb/internal/datastore/postgres")
+
+	pgxpoolHist = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "spicedb",
+		Subsystem: "pgxpool",
+		Name:      "acquire_duration_nanoseconds",
+		Help:      "Histogram of a pool resource acquire duration (nanoseconds).",
+		// 50µs, 100µs, 200µs, 500µs, 1ms, 2ms, 5ms, 10ms, 20ms, 50ms, 100ms, 200ms
+		Buckets: []float64{
+			50_000,
+			100_000,
+			200_000,
+			500_000,
+			1_000_000,
+			2_000_000,
+			5_000_000,
+			10_000_000,
+			20_000_000,
+			50_000_000,
+			100_000_000,
+			200_000_000,
+		},
+	}, []string{"pool_usage", "empty"})
 )
 
 type sqlFilter interface {
@@ -147,6 +172,15 @@ func newPostgresDatastore(
 	// Setup the config for each of the read and write pools.
 	readPoolConfig := pgConfig.Copy()
 	config.readPoolOpts.ConfigurePgx(readPoolConfig)
+	readPoolConfig.PuddleMetrics = puddle.NewMetrics(
+		puddle.WithExternalAcquireObserver(
+			func(d time.Duration, isEmptyAcquire bool) {
+				pgxpoolHist.
+					WithLabelValues("read", strconv.FormatBool(isEmptyAcquire)).
+					Observe(float64(d.Nanoseconds()))
+			},
+		),
+	)
 
 	readPoolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		RegisterTypes(conn.TypeMap())
@@ -155,6 +189,15 @@ func newPostgresDatastore(
 
 	writePoolConfig := pgConfig.Copy()
 	config.writePoolOpts.ConfigurePgx(writePoolConfig)
+	writePoolConfig.PuddleMetrics = puddle.NewMetrics(
+		puddle.WithExternalAcquireObserver(
+			func(d time.Duration, isEmptyAcquire bool) {
+				pgxpoolHist.
+					WithLabelValues("write", strconv.FormatBool(isEmptyAcquire)).
+					Observe(float64(d.Nanoseconds()))
+			},
+		),
+	)
 
 	writePoolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		RegisterTypes(conn.TypeMap())
