@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	ydbTestVersionTag  = "23.3"
+	ydbTestVersionTag  = "23.3.17"
 	ydbDefaultDatabase = "local"
 	ydbGRPCPort        = 2136
 )

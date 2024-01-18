@@ -86,6 +86,11 @@ func (Testds) Mysql() error {
 	return datastoreTest("mysql")
 }
 
+// YDB Run datastore tests for YDB.
+func (Testds) YDB() error {
+	return datastoreTest("ydb")
+}
+
 func datastoreTest(datastore string, tags ...string) error {
 	mergedTags := append([]string{"ci", "docker"}, tags...)
 	tagString := strings.Join(mergedTags, ",")
@@ -120,6 +125,11 @@ func (Testcons) Pgbouncer() error {
 // Mysql Run consistency tests for mysql
 func (Testcons) Mysql() error {
 	return consistencyTest("mysql")
+}
+
+// YDB Runs consistency tests for YDB.
+func (Testcons) YDB() error {
+	return consistencyTest("ydb")
 }
 
 func consistencyTest(datastore string) error {
