@@ -63,7 +63,7 @@ func NewYDBDriver(ctx context.Context, dsn string) (*YDBDriver, error) {
 func (d *YDBDriver) Version(ctx context.Context) (string, error) {
 	var (
 		loaded            string
-		createdAtUnixNano *int64 // don't really need this
+		createdAtUnixNano int64 // don't really need this variable
 	)
 
 	err := d.db.Table().Do(ctx, func(ctx context.Context, s table.Session) error {

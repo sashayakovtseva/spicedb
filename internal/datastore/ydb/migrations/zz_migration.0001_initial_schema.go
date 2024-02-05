@@ -15,11 +15,10 @@ import (
 // YDB also doesn't support partial secondary indexes.
 // Table's PK columns are always implicitly saved in secondary index as well.
 const (
-	// todo add NOT NULL created_at_unix_nano.
 	createSchemaVersion = `
 CREATE TABLE schema_version (
 	version_num Utf8 NOT NULL,
-	created_at_unix_nano Int64,
+	created_at_unix_nano Int64 NOT NULL,
 	PRIMARY KEY (version_num)
 );`
 
@@ -29,25 +28,23 @@ CREATE TABLE metadata (
 	PRIMARY KEY (unique_id)
 );`
 
-	// todo add NOT NULL serialized_config.
 	// todo check namespace name with Ensure in insert.
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	createNamespaceConfig = `
 CREATE TABLE namespace_config (
 	namespace Utf8 NOT NULL,
-	serialized_config String,
+	serialized_config String NOT NULL,
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (namespace, created_at_unix_nano, deleted_at_unix_nano),
 	INDEX uq_namespace_living GLOBAL SYNC ON (namespace, deleted_at_unix_nano)
 );`
 
-	// todo add NOT NULL definition.
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	createCaveat = `
 CREATE TABLE caveat (
 	name Utf8 NOT NULL,
-	definition String,
+	definition String NOT NULL,
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (name, created_at_unix_nano, deleted_at_unix_nano),
