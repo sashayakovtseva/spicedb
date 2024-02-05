@@ -60,7 +60,7 @@ func NewYDBDriver(ctx context.Context, dsn string) (*YDBDriver, error) {
 		ydbOtel.WithTraces(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("unable to instantiate YDBDriver: %w", err)
+		return nil, fmt.Errorf("failed to instantiate YDBDriver: %w", err)
 	}
 
 	return &YDBDriver{
@@ -105,7 +105,7 @@ func (d *YDBDriver) Version(ctx context.Context) (string, error) {
 		if isMissingTableError(err) || errors.Is(err, io.EOF) {
 			return "", nil
 		}
-		return "", fmt.Errorf("unable to load alembic revision: %w", err)
+		return "", fmt.Errorf("failed to load alembic revision: %w", err)
 	}
 
 	return loaded, nil
@@ -121,7 +121,7 @@ func (d *YDBDriver) WriteVersion(ctx context.Context, tx TxActorWithOptions, ver
 		),
 	)
 	if err != nil {
-		return fmt.Errorf("unable to insert new version row: %w", err)
+		return fmt.Errorf("failed to insert new version row: %w", err)
 	}
 	defer res.Close()
 
