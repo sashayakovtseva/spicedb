@@ -14,12 +14,13 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 
+	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/migrate"
 	"github.com/authzed/spicedb/pkg/truetime"
 )
 
-var _ migrate.Driver[table.Client, table.TransactionActor] = (*YDBDriver)(nil)
+var _ migrate.Driver[TableClientWithOptions, TxActorWithOptions] = (*YDBDriver)(nil)
 
 const (
 	queryLoadVersion = `
@@ -40,13 +41,20 @@ INSERT INTO schema_version(version_num, created_at_unix_nano) VALUES ($newVersio
 `
 )
 
+type options struct {
+	tablePathPrefix string
+}
+
 // YDBDriver implements a schema migration facility for use in SpiceDB's YDB datastore.
 type YDBDriver struct {
 	db *ydb.Driver
+	options
 }
 
 // NewYDBDriver creates a new driver with active connections to the database specified.
 func NewYDBDriver(ctx context.Context, dsn string) (*YDBDriver, error) {
+	parsedDSN := common.ParseDSN(dsn)
+
 	db, err := ydb.Open(ctx, dsn,
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydbOtel.WithTraces(),
@@ -55,7 +63,12 @@ func NewYDBDriver(ctx context.Context, dsn string) (*YDBDriver, error) {
 		return nil, fmt.Errorf("unable to instantiate YDBDriver: %w", err)
 	}
 
-	return &YDBDriver{db}, nil
+	return &YDBDriver{
+		db: db,
+		options: options{
+			tablePathPrefix: parsedDSN.TablePathPrefix,
+		},
+	}, nil
 }
 
 // Version returns the current version of the schema in the backing datastore.
@@ -67,7 +80,12 @@ func (d *YDBDriver) Version(ctx context.Context) (string, error) {
 	)
 
 	err := d.db.Table().Do(ctx, func(ctx context.Context, s table.Session) error {
-		_, res, err := s.Execute(ctx, table.DefaultTxControl(), queryLoadVersion, nil)
+		_, res, err := s.Execute(
+			ctx,
+			table.DefaultTxControl(),
+			common.RewriteQuery(queryLoadVersion, d.tablePathPrefix),
+			nil,
+		)
 		if err != nil {
 			return err
 		}
@@ -93,8 +111,10 @@ func (d *YDBDriver) Version(ctx context.Context) (string, error) {
 	return loaded, nil
 }
 
-func (d *YDBDriver) WriteVersion(ctx context.Context, tx table.TransactionActor, version, replaced string) error {
-	res, err := tx.Execute(ctx, queryWriteVersion,
+func (d *YDBDriver) WriteVersion(ctx context.Context, tx TxActorWithOptions, version, _ string) error {
+	res, err := tx.tx.Execute(
+		ctx,
+		common.RewriteQuery(queryWriteVersion, tx.opts.tablePathPrefix),
 		table.NewQueryParameters(
 			table.ValueParam("$newVersion", types.TextValue(version)),
 			table.ValueParam("$createAtUnixNano", types.Int64Value(truetime.UnixNano())),
@@ -109,12 +129,20 @@ func (d *YDBDriver) WriteVersion(ctx context.Context, tx table.TransactionActor,
 }
 
 // Conn returns the underlying table client instance for this driver.
-func (d *YDBDriver) Conn() table.Client {
-	return d.db.Table()
+func (d *YDBDriver) Conn() TableClientWithOptions {
+	return TableClientWithOptions{
+		client: d.db.Table(),
+		opts:   d.options,
+	}
 }
 
-func (d *YDBDriver) RunTx(ctx context.Context, f migrate.TxMigrationFunc[table.TransactionActor]) error {
-	return d.db.Table().DoTx(ctx, table.TxOperation(f))
+func (d *YDBDriver) RunTx(ctx context.Context, f migrate.TxMigrationFunc[TxActorWithOptions]) error {
+	return d.db.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		return f(ctx, TxActorWithOptions{
+			tx:   tx,
+			opts: d.options,
+		})
+	})
 }
 
 // Close disposes the driver.

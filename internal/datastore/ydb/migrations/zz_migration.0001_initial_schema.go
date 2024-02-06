@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
+
+	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 )
 
 // YDB doesn't support unique secondary indexes, so one should manually check row uniqueness before insert.
@@ -78,14 +80,14 @@ CREATE TABLE relation_tuple (
 )
 
 func init() {
-	err := YDBMigrations.Register("initial", "", func(ctx context.Context, client table.Client) error {
-		return client.Do(ctx, func(ctx context.Context, s table.Session) error {
+	err := YDBMigrations.Register("initial", "", func(ctx context.Context, client TableClientWithOptions) error {
+		return client.client.Do(ctx, func(ctx context.Context, s table.Session) error {
 			statements := []string{
-				createSchemaVersion,
-				createUniqueIDTable,
-				createNamespaceConfig,
-				createCaveat,
-				createRelationTuple,
+				common.RewriteQuery(createSchemaVersion, client.opts.tablePathPrefix),
+				common.RewriteQuery(createUniqueIDTable, client.opts.tablePathPrefix),
+				common.RewriteQuery(createNamespaceConfig, client.opts.tablePathPrefix),
+				common.RewriteQuery(createCaveat, client.opts.tablePathPrefix),
+				common.RewriteQuery(createRelationTuple, client.opts.tablePathPrefix),
 			}
 			for _, stmt := range statements {
 				if err := s.ExecuteSchemeQuery(ctx, stmt); err != nil {
@@ -95,8 +97,12 @@ func init() {
 
 			return nil
 		})
-	}, func(ctx context.Context, tx table.TransactionActor) error {
-		_, err := tx.Execute(ctx, insertUniqueID, &table.QueryParameters{})
+	}, func(ctx context.Context, tx TxActorWithOptions) error {
+		_, err := tx.tx.Execute(
+			ctx,
+			common.RewriteQuery(insertUniqueID, tx.opts.tablePathPrefix),
+			&table.QueryParameters{},
+		)
 		return err
 	})
 	if err != nil {
