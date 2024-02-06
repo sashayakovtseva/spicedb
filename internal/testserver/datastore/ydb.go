@@ -3,6 +3,7 @@
 package datastore
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -12,16 +13,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/ory/dockertest/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/ydb-platform/ydb-go-sdk/v3"
 
 	ydbDatastore "github.com/authzed/spicedb/internal/datastore/ydb"
 	ydbMigrations "github.com/authzed/spicedb/internal/datastore/ydb/migrations"
+
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/migrate"
 )
 
 const (
-	ydbTestVersionTag  = "23.3.17"
+	ydbTestVersionTag  = "nightly"
 	ydbDefaultDatabase = "local"
 	ydbGRPCPort        = 2136
 )
@@ -51,40 +52,55 @@ func (r ydbTester) NewDatabase(t testing.TB) string {
 	// create a new container with default /local database instead.
 
 	containerName := fmt.Sprintf("ydb-%s", uuid.New().String())
+	hostname := "localhost"
+	if r.bridgeNetworkName != "" {
+		hostname = containerName
+	}
+
 	resource, err := r.pool.RunWithOptions(&dockertest.RunOptions{
 		Name:       containerName,
-		Hostname:   "localhost",
-		Repository: "cr.yandex/yc/yandex-docker-local-ydb",
+		Hostname:   hostname,
+		Repository: "ghcr.io/ydb-platform/local-ydb",
 		Tag:        ydbTestVersionTag,
-		Env:        []string{"YDB_USE_IN_MEMORY_PDISKS=true"},
-		NetworkID:  r.bridgeNetworkName,
+		Env: []string{
+			"YDB_USE_IN_MEMORY_PDISKS=true",
+			"YDB_FEATURE_FLAGS=enable_not_null_data_columns",
+		},
+		NetworkID: r.bridgeNetworkName,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.pool.Purge(resource)) })
 
-	hostname := "localhost"
-	port := resource.GetPort(fmt.Sprintf("%d/tcp", ydbGRPCPort))
-	if r.bridgeNetworkName != "" {
-		hostname = containerName
-		port = strconv.FormatInt(ydbGRPCPort, 10)
-	}
-
-	dsn := fmt.Sprintf("grpc://%s:%s/%s", hostname, port, ydbDefaultDatabase)
 	require.NoError(t, r.pool.Retry(func() error { // await container is ready
-		ctx, cancel := context.WithTimeout(context.Background(), dockerBootTimeout)
-		defer cancel()
+		var buf bytes.Buffer
 
-		driver, err := ydb.Open(ctx, dsn)
+		code, err := resource.Exec([]string{
+			"/ydb",
+			"-e",
+			fmt.Sprintf("grpc://localhost:%d", ydbGRPCPort),
+			"-d",
+			"/" + ydbDefaultDatabase,
+			"scheme",
+			"ls",
+		}, dockertest.ExecOptions{
+			StdErr: &buf,
+		})
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %s", err, buf.String())
 		}
-
-		if _, err := driver.Scheme().ListDirectory(ctx, ydbDefaultDatabase); err != nil {
-			return err
+		if code != 0 {
+			return fmt.Errorf("exited with %d: %s", code, buf.String())
 		}
 
 		return nil
 	}))
+
+	port := resource.GetPort(fmt.Sprintf("%d/tcp", ydbGRPCPort))
+	if r.bridgeNetworkName != "" {
+		port = strconv.FormatInt(ydbGRPCPort, 10)
+	}
+
+	dsn := fmt.Sprintf("grpc://%s:%s/%s", hostname, port, ydbDefaultDatabase)
 	return dsn
 }
 
