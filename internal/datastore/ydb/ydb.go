@@ -2,14 +2,19 @@ package ydb
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
+	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
+	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"golang.org/x/sync/errgroup"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
-	"github.com/authzed/spicedb/internal/datastore/common"
+	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
+	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
@@ -20,15 +25,15 @@ func init() {
 }
 
 var (
-	_ datastore.Datastore     = &ydbDatastore{}
-	_ common.GarbageCollector = &ydbDatastore{}
+	_ datastore.Datastore              = &ydbDatastore{}
+	_ datastoreCommon.GarbageCollector = &ydbDatastore{}
 )
 
 const Engine = "ydb"
 
 // NewYDBDatastore initializes a SpiceDB datastore that uses a YDB database.
-func NewYDBDatastore(ctx context.Context, url string, options ...Option) (datastore.Datastore, error) {
-	ds, err := newYDBDatastore(ctx, url, options...)
+func NewYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore.Datastore, error) {
+	ds, err := newYDBDatastore(ctx, dsn, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +42,7 @@ func NewYDBDatastore(ctx context.Context, url string, options ...Option) (datast
 
 type ydbDatastore struct {
 	driver *ydb.Driver
+	config ydbConfig
 
 	gcGroup  *errgroup.Group
 	gcCtx    context.Context
@@ -44,8 +50,31 @@ type ydbDatastore struct {
 	gcHasRun atomic.Bool
 }
 
-func newYDBDatastore(ctx context.Context, url string, options ...Option) (datastore.Datastore, error) {
-	return nil, nil
+func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore.Datastore, error) {
+	parsedDSN := common.ParseDSN(dsn)
+
+	config := generateConfig(opts)
+	config.tablePathPrefix = parsedDSN.TablePathPrefix
+
+	db, err := ydb.Open(
+		ctx,
+		parsedDSN.OriginalDSN,
+		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
+		ydbOtel.WithTraces(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open YDB connectionn: %w", err)
+	}
+
+	return &ydbDatastore{
+		driver: db,
+		config: config,
+
+		gcGroup:  nil,
+		gcCtx:    nil,
+		cancelGc: nil,
+		gcHasRun: atomic.Bool{},
+	}, nil
 }
 
 func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {
@@ -93,7 +122,7 @@ func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, er
 	panic("implement me")
 }
 
-func (y *ydbDatastore) Features(ctx context.Context) (*datastore.Features, error) {
+func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
 	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
 }
 

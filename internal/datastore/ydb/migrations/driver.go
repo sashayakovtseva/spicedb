@@ -55,7 +55,9 @@ type YDBDriver struct {
 func NewYDBDriver(ctx context.Context, dsn string) (*YDBDriver, error) {
 	parsedDSN := common.ParseDSN(dsn)
 
-	db, err := ydb.Open(ctx, dsn,
+	db, err := ydb.Open(
+		ctx,
+		parsedDSN.OriginalDSN,
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydbOtel.WithTraces(),
 	)
