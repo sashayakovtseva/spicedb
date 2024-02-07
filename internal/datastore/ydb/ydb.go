@@ -9,6 +9,8 @@ import (
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"golang.org/x/sync/errgroup"
 
@@ -142,5 +144,38 @@ func (y *ydbDatastore) Close() error {
 		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
 	}
 
+	return nil
+}
+
+func queryRowTx(
+	ctx context.Context,
+	tx table.TransactionActor,
+	query string,
+	queryParams *table.QueryParameters,
+	values ...indexed.RequiredOrOptional,
+) error {
+	res, err := tx.Execute(
+		ctx,
+		query,
+		queryParams,
+	)
+	if err != nil {
+		return err
+	}
+	if err := res.NextResultSetErr(ctx); err != nil {
+		return err
+	}
+	if !res.NextRow() {
+		return fmt.Errorf("no unique id rows")
+	}
+	if err := res.Scan(values...); err != nil {
+		return err
+	}
+	if err := res.Err(); err != nil {
+		return err
+	}
+	if err := res.Close(); err != nil {
+		return err
+	}
 	return nil
 }

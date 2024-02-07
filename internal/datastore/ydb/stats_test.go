@@ -22,9 +22,12 @@ func TestYDBDatastoreStatistics(t *testing.T) {
 		return ds
 	})
 
+	// todo write some relationships for test
+
 	stats, err := ds.Statistics(context.Background())
 	require.NoError(t, err)
 
 	require.NotEmpty(t, stats.UniqueID)
 	t.Logf("unique_id: %s", stats.UniqueID)
+	require.Zero(t, stats.EstimatedRelationshipCount)
 }
