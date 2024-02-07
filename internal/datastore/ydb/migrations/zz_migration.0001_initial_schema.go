@@ -83,11 +83,11 @@ func init() {
 	err := YDBMigrations.Register("initial", "", func(ctx context.Context, client TableClientWithOptions) error {
 		return client.client.Do(ctx, func(ctx context.Context, s table.Session) error {
 			statements := []string{
-				common.RewriteQuery(createSchemaVersion, client.opts.tablePathPrefix),
-				common.RewriteQuery(createUniqueIDTable, client.opts.tablePathPrefix),
-				common.RewriteQuery(createNamespaceConfig, client.opts.tablePathPrefix),
-				common.RewriteQuery(createCaveat, client.opts.tablePathPrefix),
-				common.RewriteQuery(createRelationTuple, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createSchemaVersion, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createUniqueIDTable, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createNamespaceConfig, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createCaveat, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createRelationTuple, client.opts.tablePathPrefix),
 			}
 			for _, stmt := range statements {
 				if err := s.ExecuteSchemeQuery(ctx, stmt); err != nil {
@@ -100,7 +100,7 @@ func init() {
 	}, func(ctx context.Context, tx TxActorWithOptions) error {
 		_, err := tx.tx.Execute(
 			ctx,
-			common.RewriteQuery(insertUniqueID, tx.opts.tablePathPrefix),
+			common.AddTablePrefix(insertUniqueID, tx.opts.tablePathPrefix),
 			&table.QueryParameters{},
 		)
 		return err

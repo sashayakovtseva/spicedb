@@ -83,7 +83,7 @@ func (d *YDBDriver) Version(ctx context.Context) (string, error) {
 		_, res, err := s.Execute(
 			ctx,
 			table.DefaultTxControl(),
-			common.RewriteQuery(queryLoadVersion, d.tablePathPrefix),
+			common.AddTablePrefix(queryLoadVersion, d.tablePathPrefix),
 			nil,
 		)
 		if err != nil {
@@ -114,7 +114,7 @@ func (d *YDBDriver) Version(ctx context.Context) (string, error) {
 func (d *YDBDriver) WriteVersion(ctx context.Context, tx TxActorWithOptions, version, _ string) error {
 	res, err := tx.tx.Execute(
 		ctx,
-		common.RewriteQuery(queryWriteVersion, tx.opts.tablePathPrefix),
+		common.AddTablePrefix(queryWriteVersion, tx.opts.tablePathPrefix),
 		table.NewQueryParameters(
 			table.ValueParam("$newVersion", types.TextValue(version)),
 			table.ValueParam("$createAtUnixNano", types.Int64Value(truetime.UnixNano())),

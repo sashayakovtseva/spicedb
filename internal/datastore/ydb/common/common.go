@@ -36,7 +36,7 @@ var bytesPool = sync.Pool{
 	},
 }
 
-func RewriteQuery(query string, tablePathPrefix string) string {
+func AddTablePrefix(query string, tablePathPrefix string) string {
 	if tablePathPrefix == "" {
 		return query
 	}
