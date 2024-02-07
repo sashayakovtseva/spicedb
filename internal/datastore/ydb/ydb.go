@@ -16,10 +16,12 @@ import (
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
 	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
+	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
+	"github.com/authzed/spicedb/pkg/truetime"
 )
 
 func init() {
@@ -99,9 +101,9 @@ func (y *ydbDatastore) OptimizedRevision(ctx context.Context) (datastore.Revisio
 	panic("implement me")
 }
 
-func (y *ydbDatastore) HeadRevision(ctx context.Context) (datastore.Revision, error) {
-	// TODO implement me
-	panic("implement me")
+func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
+	now := truetime.UnixNano()
+	return revisions.NewForTimestamp(now), nil
 }
 
 func (y *ydbDatastore) CheckRevision(ctx context.Context, revision datastore.Revision) error {
@@ -162,6 +164,8 @@ func queryRowTx(
 	if err != nil {
 		return err
 	}
+	defer res.Close()
+
 	if err := res.NextResultSetErr(ctx); err != nil {
 		return err
 	}
@@ -174,8 +178,6 @@ func queryRowTx(
 	if err := res.Err(); err != nil {
 		return err
 	}
-	if err := res.Close(); err != nil {
-		return err
-	}
+
 	return nil
 }

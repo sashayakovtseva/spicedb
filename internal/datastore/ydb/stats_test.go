@@ -14,10 +14,7 @@ func TestYDBDatastoreStatistics(t *testing.T) {
 	engine := testserverDatastore.RunYDBForTesting(t, "")
 
 	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
-		ds, err := NewYDBDatastore(
-			context.Background(),
-			dsn,
-		)
+		ds, err := NewYDBDatastore(context.Background(), dsn)
 		require.NoError(t, err)
 		return ds
 	})
@@ -30,4 +27,5 @@ func TestYDBDatastoreStatistics(t *testing.T) {
 	require.NotEmpty(t, stats.UniqueID)
 	t.Logf("unique_id: %s", stats.UniqueID)
 	require.Zero(t, stats.EstimatedRelationshipCount)
+	require.Empty(t, stats.ObjectTypeStatistics)
 }

@@ -25,32 +25,56 @@ FROM
 WHERE 
 	Path = $table_path_prefix || '/relation_tuple';
 `
+		queryLiveNamespaces = `
+SELECT 
+    serialized_config,
+    created_at_unix_nano 
+FROM 
+    namespace_config
+WHERE 
+    deleted_at_unix_nano IS NULL
+`
 	)
 
-	var stats datastore.Stats
+	var (
+		nsDefs   []datastore.RevisionedNamespace
+		uniqueID string
+		relCount uint64
+	)
 
 	err := y.driver.Table().DoTx(
 		ctx,
 		func(ctx context.Context, tx table.TransactionActor) error {
-			if err := queryRowTx(
+			err := queryRowTx(
 				ctx,
 				tx,
 				common.RewriteQuery(queryUniqueID, y.config.tablePathPrefix),
 				nil,
-				&stats.UniqueID,
-			); err != nil {
+				&uniqueID,
+			)
+			if err != nil {
 				return err
 			}
 
-			if err := queryRowTx(
+			err = queryRowTx(
 				ctx,
 				tx,
 				queryEstimatedRelationshipCount, // no need to rewrite this query
 				table.NewQueryParameters(
 					table.ValueParam("$table_path_prefix", types.TextValue(y.config.tablePathPrefix)),
 				),
-				&stats.EstimatedRelationshipCount,
-			); err != nil {
+				&relCount,
+			)
+			if err != nil {
+				return err
+			}
+
+			nsDefs, err = loadAllNamespaces(
+				ctx,
+				tx,
+				common.RewriteQuery(queryLiveNamespaces, y.config.tablePathPrefix),
+			)
+			if err != nil {
 				return err
 			}
 
@@ -61,5 +85,9 @@ WHERE
 		return datastore.Stats{}, fmt.Errorf("failed to query datastore stats: %w", err)
 	}
 
-	return stats, nil
+	return datastore.Stats{
+		UniqueID:                   uniqueID,
+		EstimatedRelationshipCount: relCount,
+		ObjectTypeStatistics:       datastore.ComputeObjectTypeStats(nsDefs),
+	}, nil
 }
