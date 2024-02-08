@@ -30,6 +30,8 @@ func init() {
 var (
 	_ datastore.Datastore              = &ydbDatastore{}
 	_ datastoreCommon.GarbageCollector = &ydbDatastore{}
+
+	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 )
 
 const Engine = "ydb"
@@ -44,16 +46,22 @@ func NewYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore
 }
 
 type ydbDatastore struct {
-	driver      *ydb.Driver
+	*revisions.RemoteClockRevisions
+	revisions.CommonDecoder
+
+	driver *ydb.Driver
+	config ydbConfig
+
 	originalDSN string
-	config      ydbConfig
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
 	parsedDSN := common.ParseDSN(dsn)
 
 	config := generateConfig(opts)
-	config.tablePathPrefix = parsedDSN.TablePathPrefix
+	if parsedDSN.TablePathPrefix != "" {
+		config.tablePathPrefix = parsedDSN.TablePathPrefix
+	}
 
 	db, err := ydb.Open(
 		ctx,
@@ -65,11 +73,25 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		return nil, fmt.Errorf("failed to open YDB connectionn: %w", err)
 	}
 
-	return &ydbDatastore{
+	maxRevisionStaleness := time.Duration(float64(config.revisionQuantization.Nanoseconds())*
+		config.maxRevisionStalenessPercent) * time.Nanosecond
+
+	ds := &ydbDatastore{
+		RemoteClockRevisions: revisions.NewRemoteClockRevisions(
+			config.gcWindow,
+			maxRevisionStaleness,
+			config.followerReadDelay,
+			config.revisionQuantization,
+		),
+		CommonDecoder: revisions.CommonDecoder{Kind: revisions.Timestamp},
+
 		driver:      db,
 		originalDSN: dsn,
 		config:      config,
-	}, nil
+	}
+	ds.SetNowFunc(ds.HeadRevision)
+
+	return ds, nil
 }
 
 func (y *ydbDatastore) Close() error {
@@ -132,24 +154,9 @@ func (y *ydbDatastore) ReadWriteTx(
 	panic("implement me")
 }
 
-func (y *ydbDatastore) OptimizedRevision(ctx context.Context) (datastore.Revision, error) {
-	// TODO implement me
-	panic("implement me")
-}
-
 func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
 	now := truetime.UnixNano()
 	return revisions.NewForTimestamp(now), nil
-}
-
-func (y *ydbDatastore) CheckRevision(ctx context.Context, revision datastore.Revision) error {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) RevisionFromString(serialized string) (datastore.Revision, error) {
-	// TODO implement me
-	panic("implement me")
 }
 
 func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
