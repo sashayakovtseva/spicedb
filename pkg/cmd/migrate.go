@@ -13,6 +13,8 @@ import (
 	mysqlmigrations "github.com/authzed/spicedb/internal/datastore/mysql/migrations"
 	"github.com/authzed/spicedb/internal/datastore/postgres/migrations"
 	spannermigrations "github.com/authzed/spicedb/internal/datastore/spanner/migrations"
+	"github.com/authzed/spicedb/internal/datastore/ydb"
+	ydbMigrations "github.com/authzed/spicedb/internal/datastore/ydb/migrations"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/cmd/server"
 	"github.com/authzed/spicedb/pkg/cmd/termination"
@@ -93,6 +95,14 @@ func migrateRun(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("unable to create migration driver for %s: %w", datastoreEngine, err)
 		}
 		return runMigration(cmd.Context(), migrationDriver, mysqlmigrations.Manager, args[0], timeout, migrationBatachSize)
+	} else if datastoreEngine == ydb.Engine {
+		log.Ctx(cmd.Context()).Info().Msg("migrating ydb datastore")
+
+		migrationDriver, err := ydbMigrations.NewYDBDriver(cmd.Context(), dbURL)
+		if err != nil {
+			return fmt.Errorf("unable to create migration driver for %s: %w", datastoreEngine, err)
+		}
+		return runMigration(cmd.Context(), migrationDriver, ydbMigrations.YDBMigrations, args[0], timeout, migrationBatachSize)
 	}
 
 	return fmt.Errorf("cannot migrate datastore engine type: %s", datastoreEngine)
@@ -152,6 +162,8 @@ func HeadRevision(engine string) (string, error) {
 		return mysqlmigrations.Manager.HeadRevision()
 	case "spanner":
 		return spannermigrations.SpannerMigrations.HeadRevision()
+	case ydb.Engine:
+		return ydbMigrations.YDBMigrations.HeadRevision()
 	default:
 		return "", fmt.Errorf("cannot migrate datastore engine type: %s", engine)
 	}
