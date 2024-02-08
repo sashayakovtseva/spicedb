@@ -8,8 +8,52 @@ import (
 
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/pkg/datastore"
+	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
+
+type ydbReader struct {
+}
+
+func (y *ydbReader) ReadCaveatByName(ctx context.Context, name string) (caveat *core.CaveatDefinition, lastWritten datastore.Revision, err error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) ListAllCaveats(ctx context.Context) ([]datastore.RevisionedCaveat, error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) ([]datastore.RevisionedCaveat, error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) QueryRelationships(ctx context.Context, filter datastore.RelationshipsFilter, options ...options.QueryOptionsOption) (datastore.RelationshipIterator, error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) ReverseQueryRelationships(ctx context.Context, subjectsFilter datastore.SubjectsFilter, options ...options.ReverseQueryOptionsOption) (datastore.RelationshipIterator, error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) ReadNamespaceByName(ctx context.Context, nsName string) (ns *core.NamespaceDefinition, lastWritten datastore.Revision, err error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) ListAllNamespaces(ctx context.Context) ([]datastore.RevisionedNamespace, error) {
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbReader) LookupNamespacesWithNames(ctx context.Context, nsNames []string) ([]datastore.RevisionedNamespace, error) {
+	// TODO implement me
+	panic("implement me")
+}
 
 func loadAllNamespaces(
 	ctx context.Context,
