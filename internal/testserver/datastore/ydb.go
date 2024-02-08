@@ -16,6 +16,7 @@ import (
 
 	ydbDatastore "github.com/authzed/spicedb/internal/datastore/ydb"
 	ydbMigrations "github.com/authzed/spicedb/internal/datastore/ydb/migrations"
+	"github.com/authzed/spicedb/pkg/secrets"
 
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/migrate"
@@ -33,7 +34,6 @@ type ydbTester struct {
 
 	hostname string
 	port     string
-	dsn      string
 }
 
 // RunYDBForTesting returns a RunningEngineForTest for YDB.
@@ -41,23 +41,13 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 	pool, err := dockertest.NewPool("")
 	require.NoError(t, err)
 
-	return ydbTester{
-		pool:              pool,
-		bridgeNetworkName: bridgeNetworkName,
-	}
-}
-
-func (r ydbTester) NewDatabase(t testing.TB) string {
-	// there's no easy way to create new database in a local YDB, so
-	// create a new container with default /local database instead.
-
 	containerName := fmt.Sprintf("ydb-%s", uuid.New().String())
 	hostname := "localhost"
-	if r.bridgeNetworkName != "" {
+	if bridgeNetworkName != "" {
 		hostname = containerName
 	}
 
-	resource, err := r.pool.RunWithOptions(&dockertest.RunOptions{
+	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
 		Name:       containerName,
 		Hostname:   hostname,
 		Repository: "ghcr.io/ydb-platform/local-ydb",
@@ -66,12 +56,14 @@ func (r ydbTester) NewDatabase(t testing.TB) string {
 			"YDB_USE_IN_MEMORY_PDISKS=true",
 			"YDB_FEATURE_FLAGS=enable_not_null_data_columns",
 		},
-		NetworkID: r.bridgeNetworkName,
+		NetworkID: bridgeNetworkName,
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, r.pool.Purge(resource)) })
+	t.Cleanup(func() { require.NoError(t, pool.Purge(resource)) })
 
-	require.NoError(t, r.pool.Retry(func() error { // await container is ready
+	// await container is ready.
+	// since YDB has internal cluster discovery we can't check availability from outside network.
+	require.NoError(t, pool.Retry(func() error {
 		var buf bytes.Buffer
 
 		code, err := resource.Exec([]string{
@@ -96,11 +88,28 @@ func (r ydbTester) NewDatabase(t testing.TB) string {
 	}))
 
 	port := resource.GetPort(fmt.Sprintf("%d/tcp", ydbGRPCPort))
-	if r.bridgeNetworkName != "" {
+	if bridgeNetworkName != "" {
 		port = strconv.FormatInt(ydbGRPCPort, 10)
 	}
 
-	dsn := fmt.Sprintf("grpc://%s:%s/%s", hostname, port, ydbDefaultDatabase)
+	return ydbTester{
+		pool:              pool,
+		bridgeNetworkName: bridgeNetworkName,
+		hostname:          hostname,
+		port:              port,
+	}
+}
+
+func (r ydbTester) NewDatabase(t testing.TB) string {
+	// there's no easy way to create new database in a local YDB,
+	// so create a new directory instead.
+
+	uniquePortion, err := secrets.TokenHex(4)
+	require.NoError(t, err)
+
+	directory := fmt.Sprintf("/%s/%s", ydbDefaultDatabase, uniquePortion)
+	dsn := fmt.Sprintf("grpc://%s:%s/%s?table_path_prefix=%s", r.hostname, r.port, ydbDefaultDatabase, directory)
+
 	return dsn
 }
 

@@ -7,4 +7,14 @@ import (
 )
 
 // YDBMigrations implements a migration manager for the YDBDriver.
-var YDBMigrations = migrate.NewManager[*YDBDriver, table.Client, table.TransactionActor]()
+var YDBMigrations = migrate.NewManager[*YDBDriver, TableClientWithOptions, TxActorWithOptions]()
+
+type TableClientWithOptions struct {
+	client table.Client
+	opts   options
+}
+
+type TxActorWithOptions struct {
+	tx   table.TransactionActor
+	opts options
+}
