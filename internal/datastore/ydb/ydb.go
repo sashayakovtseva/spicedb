@@ -3,7 +3,6 @@ package ydb
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
@@ -12,7 +11,6 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
-	"golang.org/x/sync/errgroup"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
 	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
@@ -47,14 +45,9 @@ func NewYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore
 type ydbDatastore struct {
 	driver *ydb.Driver
 	config ydbConfig
-
-	gcGroup  *errgroup.Group
-	gcCtx    context.Context
-	cancelGc context.CancelFunc
-	gcHasRun atomic.Bool
 }
 
-func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore.Datastore, error) {
+func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
 	parsedDSN := common.ParseDSN(dsn)
 
 	config := generateConfig(opts)
@@ -73,11 +66,6 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore
 	return &ydbDatastore{
 		driver: db,
 		config: config,
-
-		gcGroup:  nil,
-		gcCtx:    nil,
-		cancelGc: nil,
-		gcHasRun: atomic.Bool{},
 	}, nil
 }
 
@@ -131,14 +119,6 @@ func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) 
 }
 
 func (y *ydbDatastore) Close() error {
-	y.cancelGc()
-
-	if y.gcGroup != nil {
-		if err := y.gcGroup.Wait(); err != nil {
-			log.Warn().Err(err).Msg("failed to shutdown YDB garbage collector")
-		}
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
 	defer cancel()
 

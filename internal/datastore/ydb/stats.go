@@ -48,7 +48,7 @@ WHERE
 			err := queryRowTx(
 				ctx,
 				tx,
-				common.RewriteQuery(queryUniqueID, y.config.tablePathPrefix),
+				common.AddTablePrefix(queryUniqueID, y.config.tablePathPrefix),
 				nil,
 				&uniqueID,
 			)
@@ -72,7 +72,7 @@ WHERE
 			nsDefs, err = loadAllNamespaces(
 				ctx,
 				tx,
-				common.RewriteQuery(queryLiveNamespaces, y.config.tablePathPrefix),
+				common.AddTablePrefix(queryLiveNamespaces, y.config.tablePathPrefix),
 			)
 			if err != nil {
 				return err
