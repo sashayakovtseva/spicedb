@@ -16,6 +16,7 @@ import (
 	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
+	"github.com/authzed/spicedb/internal/datastore/ydb/migrations"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
@@ -43,8 +44,9 @@ func NewYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore
 }
 
 type ydbDatastore struct {
-	driver *ydb.Driver
-	config ydbConfig
+	driver      *ydb.Driver
+	originalDSN string
+	config      ydbConfig
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
@@ -64,9 +66,55 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 	}
 
 	return &ydbDatastore{
-		driver: db,
-		config: config,
+		driver:      db,
+		originalDSN: dsn,
+		config:      config,
 	}, nil
+}
+
+func (y *ydbDatastore) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+	defer cancel()
+
+	if err := y.driver.Close(ctx); err != nil {
+		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
+	}
+
+	return nil
+}
+
+func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, error) {
+	headMigration, err := migrations.YDBMigrations.HeadRevision()
+	if err != nil {
+		return datastore.ReadyState{}, fmt.Errorf("invalid head migration found for YDB: %w", err)
+	}
+
+	ydbDriver, err := migrations.NewYDBDriver(ctx, y.originalDSN)
+	if err != nil {
+		return datastore.ReadyState{}, err
+	}
+	defer ydbDriver.Close(ctx)
+
+	version, err := ydbDriver.Version(ctx)
+	if err != nil {
+		return datastore.ReadyState{}, err
+	}
+
+	if version != headMigration {
+		return datastore.ReadyState{
+			Message: fmt.Sprintf(
+				"YDB is not migrated: currently at revision `%s`, but requires `%s`. Please run `spicedb migrate`.",
+				version,
+				headMigration,
+			),
+		}, nil
+	}
+
+	return datastore.ReadyState{IsReady: true}, nil
+}
+
+func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
+	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
 }
 
 func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {
@@ -107,26 +155,6 @@ func (y *ydbDatastore) RevisionFromString(serialized string) (datastore.Revision
 func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
 	// TODO implement me
 	panic("implement me")
-}
-
-func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, error) {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
-	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
-}
-
-func (y *ydbDatastore) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
-	defer cancel()
-
-	if err := y.driver.Close(ctx); err != nil {
-		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
-	}
-
-	return nil
 }
 
 func queryRowTx(

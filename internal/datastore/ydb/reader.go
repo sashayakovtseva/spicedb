@@ -33,7 +33,7 @@ func loadAllNamespaces(
 
 			var loaded core.NamespaceDefinition
 			if err := loaded.UnmarshalVT(config); err != nil {
-				return nil, fmt.Errorf("unable to read namespace config: %w", err)
+				return nil, fmt.Errorf("failed to read namespace config: %w", err)
 			}
 
 			revision := revisions.NewForTimestamp(createdAtUnixNano)
