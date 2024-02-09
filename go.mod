@@ -27,6 +27,7 @@ require (
 	github.com/envoyproxy/protoc-gen-validate v1.0.2
 	github.com/exaring/otelpgx v0.5.2
 	github.com/fatih/color v1.15.0
+	github.com/flymedllva/ydb-go-qb v0.0.0-20240108142018-7a30d57e17f1
 	github.com/go-errors/errors v1.5.1
 	github.com/go-logr/zerologr v1.2.3
 	github.com/go-sql-driver/mysql v1.7.1
@@ -71,6 +72,7 @@ require (
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
+	github.com/ydb-platform/ydb-go-genproto v0.0.0-20231215113745-46f6d30f974a
 	github.com/ydb-platform/ydb-go-sdk-otel v0.4.6
 	github.com/ydb-platform/ydb-go-sdk-zerolog v0.14.0
 	github.com/ydb-platform/ydb-go-sdk/v3 v3.54.3
@@ -319,7 +321,6 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	github.com/xen0n/gosmopolitan v1.2.2 // indirect
 	github.com/yagipy/maintidx v1.0.0 // indirect
-	github.com/ydb-platform/ydb-go-genproto v0.0.0-20231215113745-46f6d30f974a // indirect
 	github.com/yeya24/promlinter v0.2.0 // indirect
 	github.com/ykadowak/zerologlint v0.1.3 // indirect
 	gitlab.com/bosi/decorder v0.4.1 // indirect

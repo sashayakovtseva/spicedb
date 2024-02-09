@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	yq "github.com/flymedllva/ydb-go-qb/yqb"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
 	"github.com/authzed/spicedb/internal/datastore/revisions"
+	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
@@ -55,12 +57,27 @@ func (y *ydbReader) LookupNamespacesWithNames(ctx context.Context, nsNames []str
 	panic("implement me")
 }
 
+var (
+	readNamespaceBuilder = yq.Select("serialized_config", "created_at_unix_nano").From("namespace_config")
+	livingObjectPred     = yq.Eq{"deleted_at_unix_nano": nil}
+	livingObjectModifier = queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
+		return builder.Where(livingObjectPred)
+	})
+)
+
 func loadAllNamespaces(
 	ctx context.Context,
-	tx table.TransactionActor,
-	nsQuery string,
+	tablePathPrefix string,
+	executor queryExecutor,
+	modifier queryModifier,
 ) ([]datastore.RevisionedNamespace, error) {
-	res, err := tx.Execute(ctx, nsQuery, nil)
+	sql, args, err := modifier(readNamespaceBuilder).ToYdbSql()
+	if err != nil {
+		return nil, err
+	}
+
+	sql = common.AddTablePrefix(sql, tablePathPrefix)
+	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
 	if err != nil {
 		return nil, err
 	}

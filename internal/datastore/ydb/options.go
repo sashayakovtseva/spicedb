@@ -43,13 +43,13 @@ var defaultConfig = ydbConfig{
 // datastore interact with the running YDB database.
 type Option func(*ydbConfig)
 
-func generateConfig(options []Option) ydbConfig {
+func generateConfig(options []Option) *ydbConfig {
 	computed := defaultConfig
 	for _, option := range options {
 		option(&computed)
 	}
 
-	return computed
+	return &computed
 }
 
 // WithTablePathPrefix sets table prefix that will be implicitly added to all YDB queries.

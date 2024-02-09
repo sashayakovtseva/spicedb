@@ -8,8 +8,6 @@ import (
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
-	"github.com/ydb-platform/ydb-go-sdk/v3/table"
-	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
@@ -50,7 +48,7 @@ type ydbDatastore struct {
 	revisions.CommonDecoder
 
 	driver *ydb.Driver
-	config ydbConfig
+	config *ydbConfig
 
 	originalDSN string
 }
@@ -162,37 +160,4 @@ func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, erro
 func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
 	// TODO implement me
 	panic("implement me")
-}
-
-func queryRowTx(
-	ctx context.Context,
-	tx table.TransactionActor,
-	query string,
-	queryParams *table.QueryParameters,
-	values ...indexed.RequiredOrOptional,
-) error {
-	res, err := tx.Execute(
-		ctx,
-		query,
-		queryParams,
-	)
-	if err != nil {
-		return err
-	}
-	defer res.Close()
-
-	if err := res.NextResultSetErr(ctx); err != nil {
-		return err
-	}
-	if !res.NextRow() {
-		return fmt.Errorf("no unique id rows")
-	}
-	if err := res.Scan(values...); err != nil {
-		return err
-	}
-	if err := res.Err(); err != nil {
-		return err
-	}
-
-	return nil
 }
