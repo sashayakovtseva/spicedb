@@ -141,8 +141,15 @@ func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) 
 }
 
 func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {
-	// TODO implement me
-	panic("implement me")
+	rev := revision.(revisions.TimestampRevision)
+
+	return &ydbReader{
+		tablePathPrefix: y.config.tablePathPrefix,
+		executor: sessionQueryExecutor{
+			driver: y.driver,
+		},
+		modifier: revisionedQueryModifier(rev),
+	}
 }
 
 func (y *ydbDatastore) ReadWriteTx(

@@ -36,7 +36,7 @@ WHERE
 	err := y.driver.Table().DoTx(
 		ctx,
 		func(ctx context.Context, tx table.TransactionActor) error {
-			err := queryRowTx(
+			err := queryRow(
 				ctx,
 				tx,
 				common.AddTablePrefix(queryUniqueID, y.config.tablePathPrefix),
@@ -47,7 +47,7 @@ WHERE
 				return err
 			}
 
-			err = queryRowTx(
+			err = queryRow(
 				ctx,
 				tx,
 				queryEstimatedRelationshipCount, // no need to rewrite this query

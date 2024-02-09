@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	yq "github.com/flymedllva/ydb-go-qb/yqb"
+	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result"
@@ -32,11 +33,14 @@ var (
 type queryModifier func(yq.SelectBuilder) yq.SelectBuilder
 
 func revisionedQueryModifier(revision revisions.TimestampRevision) queryModifier {
-	return queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
+	return func(builder yq.SelectBuilder) yq.SelectBuilder {
 		return builder.
 			Where(yq.LtOrEq{colCreatedAtUnixNano: revision.TimestampNanoSec()}).
-			Where(yq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()})
-	})
+			Where(yq.Or{
+				yq.Eq{colDeletedAtUnixNano: nil},
+				yq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()},
+			})
+	}
 }
 
 type queryExecutor interface {
@@ -51,7 +55,7 @@ type queryExecutor interface {
 // sessionQueryExecutor implements queryExecutor for YDB sessions
 // with online read-only auto commit transaction mode.
 type sessionQueryExecutor struct {
-	s table.Session
+	driver *ydb.Driver
 }
 
 func (se sessionQueryExecutor) Execute(
@@ -60,11 +64,17 @@ func (se sessionQueryExecutor) Execute(
 	params *table.QueryParameters,
 	opts ...options.ExecuteDataQueryOption,
 ) (result.Result, error) {
-	_, res, err := se.s.Execute(ctx, table.OnlineReadOnlyTxControl(), query, params, opts...)
+	// todo check whether it is ok to close result outside of Do busy loop.
+	var res result.Result
+	err := se.driver.Table().Do(ctx, func(ctx context.Context, s table.Session) error {
+		var err error
+		_, res, err = s.Execute(ctx, table.OnlineReadOnlyTxControl(), query, params, opts...)
+		return err
+	}, table.WithIdempotent())
 	return res, err
 }
 
-func queryRowTx(
+func queryRow(
 	ctx context.Context,
 	executor queryExecutor,
 	query string,
