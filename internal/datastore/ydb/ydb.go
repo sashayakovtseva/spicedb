@@ -9,6 +9,7 @@ import (
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
+	"go.opentelemetry.io/otel"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
 	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
@@ -30,6 +31,8 @@ var (
 	_ datastoreCommon.GarbageCollector = &ydbDatastore{}
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
+
+	tracer = otel.Tracer("spicedb/internal/datastore/ydb")
 )
 
 const Engine = "ydb"

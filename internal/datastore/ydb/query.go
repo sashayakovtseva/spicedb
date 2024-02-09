@@ -9,9 +9,35 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
+
+	"github.com/authzed/spicedb/internal/datastore/revisions"
+)
+
+const (
+	colCreatedAtUnixNano = "created_at_unix_nano"
+	colDeletedAtUnixNano = "deleted_at_unix_nano"
+
+	// namespace_config
+	tableNamespaceConfig = "namespace_config"
+	colSerializedConfig  = "serialized_config"
+	colNamespace         = "namespace"
+)
+
+var (
+	livingObjectModifier = queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
+		return builder.Where(yq.Eq{colDeletedAtUnixNano: nil})
+	})
 )
 
 type queryModifier func(yq.SelectBuilder) yq.SelectBuilder
+
+func revisionedQueryModifier(revision revisions.TimestampRevision) queryModifier {
+	return queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
+		return builder.
+			Where(yq.LtOrEq{colCreatedAtUnixNano: revision.TimestampNanoSec()}).
+			Where(yq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()})
+	})
+}
 
 type queryExecutor interface {
 	Execute(
@@ -20,6 +46,22 @@ type queryExecutor interface {
 		params *table.QueryParameters,
 		opts ...options.ExecuteDataQueryOption,
 	) (result.Result, error)
+}
+
+// sessionQueryExecutor implements queryExecutor for YDB sessions
+// with online read-only auto commit transaction mode.
+type sessionQueryExecutor struct {
+	s table.Session
+}
+
+func (se sessionQueryExecutor) Execute(
+	ctx context.Context,
+	query string,
+	params *table.QueryParameters,
+	opts ...options.ExecuteDataQueryOption,
+) (result.Result, error) {
+	_, res, err := se.s.Execute(ctx, table.OnlineReadOnlyTxControl(), query, params, opts...)
+	return res, err
 }
 
 func queryRowTx(
