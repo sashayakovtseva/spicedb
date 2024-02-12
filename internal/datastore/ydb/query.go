@@ -22,6 +22,11 @@ const (
 	tableNamespaceConfig = "namespace_config"
 	colSerializedConfig  = "serialized_config"
 	colNamespace         = "namespace"
+
+	// caveat
+	tableCaveat   = "caveat"
+	coltName      = "name"
+	colDefinition = "definition"
 )
 
 var (
