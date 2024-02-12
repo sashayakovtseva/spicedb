@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	sq "github.com/Masterminds/squirrel"
 	yq "github.com/flymedllva/ydb-go-qb/yqb"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
@@ -108,7 +107,7 @@ func (r *ydbReader) loadNamespace(
 		r.tablePathPrefix,
 		r.executor,
 		func(builder yq.SelectBuilder) yq.SelectBuilder {
-			return r.modifier(builder).Where(sq.Eq{colNamespace: namespace})
+			return r.modifier(builder).Where(yq.Eq{colNamespace: namespace})
 		},
 	)
 	if err != nil {
