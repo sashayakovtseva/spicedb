@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-	yq "github.com/flymedllva/ydb-go-qb/yqb"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
 	"github.com/authzed/spicedb/internal/datastore/common"
@@ -47,16 +46,16 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 		return nil, nil
 	}
 
-	var clause yq.Or
+	var clause sq.Or
 	for _, nsName := range names {
-		clause = append(clause, yq.Eq{colName: nsName})
+		clause = append(clause, sq.Eq{colName: nsName})
 	}
 
 	caveatsWithRevisions, err := loadAllCaveats(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
 			return r.modifier(builder).Where(clause)
 		},
 	)
@@ -74,7 +73,7 @@ func (r *ydbReader) QueryRelationships(
 ) (datastore.RelationshipIterator, error) {
 	qBuilder, err := common.NewSchemaQueryFilterer(
 		relationTupleSchema,
-		sq.SelectBuilder(r.modifier(readRelationBuilder)), // todo make sure this works, use generics otherwise
+		r.modifier(readRelationBuilder),
 	).FilterWithRelationshipsFilter(filter)
 	if err != nil {
 		return nil, err
@@ -116,16 +115,16 @@ func (r *ydbReader) LookupNamespacesWithNames(
 		return nil, nil
 	}
 
-	var clause yq.Or
+	var clause sq.Or
 	for _, nsName := range nsNames {
-		clause = append(clause, yq.Eq{colNamespace: nsName})
+		clause = append(clause, sq.Eq{colNamespace: nsName})
 	}
 
 	nsDefsWithRevisions, err := loadAllNamespaces(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
 			return r.modifier(builder).Where(clause)
 		},
 	)
@@ -147,8 +146,8 @@ func (r *ydbReader) loadNamespace(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
-			return r.modifier(builder).Where(yq.Eq{colNamespace: namespace})
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
+			return r.modifier(builder).Where(sq.Eq{colNamespace: namespace})
 		},
 	)
 	if err != nil {
@@ -217,8 +216,8 @@ func (r *ydbReader) loadCaveat(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
-			return r.modifier(builder).Where(yq.Eq{colName: name})
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
+			return r.modifier(builder).Where(sq.Eq{colName: name})
 		},
 	)
 	if err != nil {

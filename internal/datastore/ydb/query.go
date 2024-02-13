@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	yq "github.com/flymedllva/ydb-go-qb/yqb"
+	sq "github.com/Masterminds/squirrel"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
@@ -53,13 +53,13 @@ var (
 		common.TupleComparison,
 	)
 
-	livingObjectModifier = queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
-		return builder.Where(yq.Eq{colDeletedAtUnixNano: nil})
+	livingObjectModifier = queryModifier(func(builder sq.SelectBuilder) sq.SelectBuilder {
+		return builder.Where(sq.Eq{colDeletedAtUnixNano: nil})
 	})
 
-	readNamespaceBuilder = yq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
-	readCaveatBuilder    = yq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
-	readRelationBuilder  = yq.Select(
+	readNamespaceBuilder = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
+	readCaveatBuilder    = sq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
+	readRelationBuilder  = sq.Select(
 		colNamespace,
 		colObjectID,
 		colRelation,
@@ -71,15 +71,15 @@ var (
 	).From(tableRelationTuple)
 )
 
-type queryModifier func(yq.SelectBuilder) yq.SelectBuilder
+type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
 
 func revisionedQueryModifier(revision revisions.TimestampRevision) queryModifier {
-	return func(builder yq.SelectBuilder) yq.SelectBuilder {
+	return func(builder sq.SelectBuilder) sq.SelectBuilder {
 		return builder.
-			Where(yq.LtOrEq{colCreatedAtUnixNano: revision.TimestampNanoSec()}).
-			Where(yq.Or{
-				yq.Eq{colDeletedAtUnixNano: nil},
-				yq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()},
+			Where(sq.LtOrEq{colCreatedAtUnixNano: revision.TimestampNanoSec()}).
+			Where(sq.Or{
+				sq.Eq{colDeletedAtUnixNano: nil},
+				sq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()},
 			})
 	}
 }
