@@ -27,7 +27,6 @@ require (
 	github.com/envoyproxy/protoc-gen-validate v1.0.2
 	github.com/exaring/otelpgx v0.5.2
 	github.com/fatih/color v1.15.0
-	github.com/flymedllva/ydb-go-qb v0.0.0-20240108142018-7a30d57e17f1
 	github.com/go-errors/errors v1.5.1
 	github.com/go-logr/zerologr v1.2.3
 	github.com/go-sql-driver/mysql v1.7.1
@@ -100,7 +99,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.16.2
 )
 
-replace github.com/Masterminds/squirrel v1.5.4 => github.com/sashayakovtseva/ydb-go-qb/yqb v0.0.0-20240213122429-65bd0152e0ae
+replace github.com/Masterminds/squirrel v1.5.4 => github.com/sashayakovtseva/ydb-go-qb/yqb v0.0.0-20240213140040-54bb6e2c3d4e
 
 require (
 	4d63.com/gocheckcompilerdirectives v1.2.1 // indirect

@@ -2,10 +2,11 @@ package ydb
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/samber/lo"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
@@ -205,8 +206,8 @@ func queryTuples(
 				ResourceAndRelation: &corev1.ObjectAndRelation{},
 				Subject:             &corev1.ObjectAndRelation{},
 			}
-			var caveatName sql.NullString
-			var caveatCtx map[string]any
+			var caveatName *string
+			var caveatCtx *[]byte
 			err := res.Scan(
 				&nextTuple.ResourceAndRelation.Namespace,
 				&nextTuple.ResourceAndRelation.ObjectId,
@@ -221,9 +222,16 @@ func queryTuples(
 				return nil, fmt.Errorf("failed to scan relation tuple: %w", err)
 			}
 
-			nextTuple.Caveat, err = common.ContextualizedCaveatFrom(caveatName.String, caveatCtx)
+			var structuredCtx map[string]any
+			if caveatCtx != nil {
+				if err := json.Unmarshal(*caveatCtx, &structuredCtx); err != nil {
+					return nil, fmt.Errorf("failed to unmarhsla relation tuple caveat context: %w", err)
+				}
+			}
+
+			nextTuple.Caveat, err = common.ContextualizedCaveatFrom(lo.FromPtr(caveatName), structuredCtx)
 			if err != nil {
-				return nil, fmt.Errorf("failed to fetch relation caveat context: %w", err)
+				return nil, fmt.Errorf("failed to create relation tuple caveat: %w", err)
 			}
 			tuples = append(tuples, nextTuple)
 		}
