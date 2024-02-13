@@ -19,6 +19,21 @@ type ydbReader struct {
 	tablePathPrefix string
 	executor        queryExecutor
 	modifier        queryModifier
+	// commonQueryExecutor is used in QueryRelationships.
+	// Basically it is a wrapper around queryExecutor in order to reuse common codebase.
+	commonQueryExecutor common.QueryExecutor
+}
+
+func newYDBReader(tablePathPrefix string, executor queryExecutor, modifier queryModifier) *ydbReader {
+	return &ydbReader{
+		tablePathPrefix: tablePathPrefix,
+		executor:        executor,
+		modifier:        modifier,
+		commonQueryExecutor: common.QueryExecutor{
+			Executor: newYDBCommonQueryExecutor(tablePathPrefix, executor),
+			ToSQL:    toYQLWrapper,
+		},
+	}
 }
 
 func (r *ydbReader) ReadCaveatByName(
@@ -78,8 +93,8 @@ func (r *ydbReader) QueryRelationships(
 	if err != nil {
 		return nil, err
 	}
-	_ = qBuilder
-	return nil, nil
+
+	return r.commonQueryExecutor.ExecuteQuery(ctx, qBuilder, opts...)
 }
 
 func (r *ydbReader) ReverseQueryRelationships(ctx context.Context, subjectsFilter datastore.SubjectsFilter, options ...options.ReverseQueryOptionsOption) (datastore.RelationshipIterator, error) {

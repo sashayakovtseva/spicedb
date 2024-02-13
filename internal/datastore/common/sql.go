@@ -485,10 +485,18 @@ func (sqf SchemaQueryFilterer) limit(limit uint64) SchemaQueryFilterer {
 	return sqf
 }
 
+type ToSQLFunc func(sq.SelectBuilder) (string, []any, error)
+
 // QueryExecutor is a tuple query runner shared by SQL implementations of the datastore.
 type QueryExecutor struct {
 	Executor ExecuteQueryFunc
+	// ToSQL may be used to wrap non-generic dialects, e.g. YQL.
+	ToSQL ToSQLFunc
 }
+
+var defaultToSQL = ToSQLFunc(func(b sq.SelectBuilder) (string, []any, error) {
+	return b.ToSql()
+})
 
 // ExecuteQuery executes the query.
 func (tqs QueryExecutor) ExecuteQuery(
@@ -514,7 +522,13 @@ func (tqs QueryExecutor) ExecuteQuery(
 	}
 
 	toExecute := query.limit(uint64(limit))
-	sql, args, err := toExecute.queryBuilder.ToSql()
+
+	toSQLFn := defaultToSQL
+	if tqs.ToSQL != nil {
+		toSQLFn = tqs.ToSQL
+	}
+
+	sql, args, err := toSQLFn(toExecute.queryBuilder)
 	if err != nil {
 		return nil, err
 	}
