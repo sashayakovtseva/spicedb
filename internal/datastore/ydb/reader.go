@@ -97,9 +97,33 @@ func (r *ydbReader) QueryRelationships(
 	return r.commonQueryExecutor.ExecuteQuery(ctx, qBuilder, opts...)
 }
 
-func (r *ydbReader) ReverseQueryRelationships(ctx context.Context, subjectsFilter datastore.SubjectsFilter, options ...options.ReverseQueryOptionsOption) (datastore.RelationshipIterator, error) {
-	// TODO implement me
-	panic("implement me")
+func (r *ydbReader) ReverseQueryRelationships(
+	ctx context.Context,
+	subjectsFilter datastore.SubjectsFilter,
+	opts ...options.ReverseQueryOptionsOption,
+) (datastore.RelationshipIterator, error) {
+	qBuilder, err := common.NewSchemaQueryFilterer(
+		relationTupleSchema,
+		r.modifier(readRelationBuilder),
+	).FilterWithSubjectsSelectors(subjectsFilter.AsSelector())
+	if err != nil {
+		return nil, err
+	}
+
+	queryOpts := options.NewReverseQueryOptionsWithOptions(opts...)
+
+	if queryOpts.ResRelation != nil {
+		qBuilder = qBuilder.
+			FilterToResourceType(queryOpts.ResRelation.Namespace).
+			FilterToRelation(queryOpts.ResRelation.Relation)
+	}
+
+	return r.commonQueryExecutor.ExecuteQuery(ctx,
+		qBuilder,
+		options.WithLimit(queryOpts.LimitForReverse),
+		options.WithAfter(queryOpts.AfterForReverse),
+		options.WithSort(queryOpts.SortForReverse),
+	)
 }
 
 func (r *ydbReader) ReadNamespaceByName(
