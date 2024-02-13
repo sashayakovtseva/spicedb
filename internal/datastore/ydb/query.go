@@ -2,6 +2,7 @@ package ydb
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
@@ -10,9 +11,13 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
+	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
+	corev1 "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
 const (
@@ -146,4 +151,88 @@ func queryRow(
 	}
 
 	return nil
+}
+
+func toYQLWrapper(b sq.SelectBuilder) (string, []any, error) {
+	query, yqlParams, err := b.ToYdbSql()
+	if err != nil {
+		return "", nil, err
+	}
+
+	// todo think how to get rid of this at all.
+	genericArgs := make([]any, len(yqlParams))
+	for i := range yqlParams {
+		genericArgs[i] = yqlParams[i]
+	}
+
+	return query, genericArgs, nil
+}
+
+func newYDBCommonQueryExecutor(tablePathPrefix string, ydbExecutor queryExecutor) common.ExecuteQueryFunc {
+	return func(ctx context.Context, sql string, args []any) ([]*corev1.RelationTuple, error) {
+		span := trace.SpanFromContext(ctx)
+		return queryTuples(ctx, tablePathPrefix, sql, args, span, ydbExecutor)
+	}
+}
+
+// queryTuples queries tuples for the given query and transaction.
+func queryTuples(
+	ctx context.Context,
+	tablePathPrefix string,
+	query string,
+	args []any,
+	span trace.Span,
+	ydbExecutor queryExecutor,
+) ([]*corev1.RelationTuple, error) {
+	params := table.NewQueryParameters()
+	for _, a := range args {
+		params.Add(a.(table.ParameterOption))
+	}
+
+	query = ydbCommon.AddTablePrefix(query, tablePathPrefix)
+	res, err := ydbExecutor.Execute(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute relation tuples query: %w", err)
+	}
+	defer res.Close()
+
+	span.AddEvent("Query issued to database")
+
+	var tuples []*corev1.RelationTuple
+	for res.NextResultSet(ctx) {
+		for res.NextRow() {
+			nextTuple := &corev1.RelationTuple{
+				ResourceAndRelation: &corev1.ObjectAndRelation{},
+				Subject:             &corev1.ObjectAndRelation{},
+			}
+			var caveatName sql.NullString
+			var caveatCtx map[string]any
+			err := res.Scan(
+				&nextTuple.ResourceAndRelation.Namespace,
+				&nextTuple.ResourceAndRelation.ObjectId,
+				&nextTuple.ResourceAndRelation.Relation,
+				&nextTuple.Subject.Namespace,
+				&nextTuple.Subject.ObjectId,
+				&nextTuple.Subject.Relation,
+				&caveatName,
+				&caveatCtx,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to scan relation tuple: %w", err)
+			}
+
+			nextTuple.Caveat, err = common.ContextualizedCaveatFrom(caveatName.String, caveatCtx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch relation caveat context: %w", err)
+			}
+			tuples = append(tuples, nextTuple)
+		}
+	}
+
+	if err := res.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read relation tuples: %w", err)
+	}
+
+	span.AddEvent("Tuples loaded", trace.WithAttributes(attribute.Int("tupleCount", len(tuples))))
+	return tuples, nil
 }
