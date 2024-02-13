@@ -11,28 +11,64 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
 
+	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 )
 
 const (
+	// common
 	colCreatedAtUnixNano = "created_at_unix_nano"
 	colDeletedAtUnixNano = "deleted_at_unix_nano"
+	colNamespace         = "namespace"
 
 	// namespace_config
 	tableNamespaceConfig = "namespace_config"
 	colSerializedConfig  = "serialized_config"
-	colNamespace         = "namespace"
 
 	// caveat
 	tableCaveat   = "caveat"
-	coltName      = "name"
+	colName       = "name"
 	colDefinition = "definition"
+
+	// relation_tuple
+	tableRelationTuple  = "relation_tuple"
+	colObjectID         = "object_id"
+	colRelation         = "relation"
+	colUsersetNamespace = "userset_namespace"
+	colUsersetObjectID  = "userset_object_id"
+	colUsersetRelation  = "userset_relation"
+	colCaveatName       = "caveat_name"
+	colCaveatContext    = "caveat_context"
 )
 
 var (
+	relationTupleSchema = common.NewSchemaInformation(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		common.TupleComparison,
+	)
+
 	livingObjectModifier = queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
 		return builder.Where(yq.Eq{colDeletedAtUnixNano: nil})
 	})
+
+	readNamespaceBuilder = yq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
+	readCaveatBuilder    = yq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
+	readRelationBuilder  = yq.Select(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		colCaveatContext,
+	).From(tableRelationTuple)
 )
 
 type queryModifier func(yq.SelectBuilder) yq.SelectBuilder

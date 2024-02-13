@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	sq "github.com/Masterminds/squirrel"
 	yq "github.com/flymedllva/ydb-go-qb/yqb"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
+	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
-	"github.com/authzed/spicedb/internal/datastore/ydb/common"
+	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
@@ -47,7 +49,7 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 
 	var clause yq.Or
 	for _, nsName := range names {
-		clause = append(clause, yq.Eq{coltName: nsName})
+		clause = append(clause, yq.Eq{colName: nsName})
 	}
 
 	caveatsWithRevisions, err := loadAllCaveats(
@@ -65,9 +67,20 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 	return caveatsWithRevisions, err
 }
 
-func (r *ydbReader) QueryRelationships(ctx context.Context, filter datastore.RelationshipsFilter, options ...options.QueryOptionsOption) (datastore.RelationshipIterator, error) {
-	// TODO implement me
-	panic("implement me")
+func (r *ydbReader) QueryRelationships(
+	ctx context.Context,
+	filter datastore.RelationshipsFilter,
+	opts ...options.QueryOptionsOption,
+) (datastore.RelationshipIterator, error) {
+	qBuilder, err := common.NewSchemaQueryFilterer(
+		relationTupleSchema,
+		sq.SelectBuilder(r.modifier(readRelationBuilder)), // todo make sure this works, use generics otherwise
+	).FilterWithRelationshipsFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	_ = qBuilder
+	return nil, nil
 }
 
 func (r *ydbReader) ReverseQueryRelationships(ctx context.Context, subjectsFilter datastore.SubjectsFilter, options ...options.ReverseQueryOptionsOption) (datastore.RelationshipIterator, error) {
@@ -123,8 +136,6 @@ func (r *ydbReader) LookupNamespacesWithNames(
 	return nsDefsWithRevisions, err
 }
 
-var readNamespaceBuilder = yq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
-
 func (r *ydbReader) loadNamespace(
 	ctx context.Context,
 	namespace string,
@@ -162,7 +173,7 @@ func loadAllNamespaces(
 		return nil, err
 	}
 
-	sql = common.AddTablePrefix(sql, tablePathPrefix)
+	sql = ydbCommon.AddTablePrefix(sql, tablePathPrefix)
 	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
 	if err != nil {
 		return nil, err
@@ -195,8 +206,6 @@ func loadAllNamespaces(
 	return nsDefs, nil
 }
 
-var readCaveatBuilder = yq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
-
 func (r *ydbReader) loadCaveat(
 	ctx context.Context,
 	name string,
@@ -209,7 +218,7 @@ func (r *ydbReader) loadCaveat(
 		r.tablePathPrefix,
 		r.executor,
 		func(builder yq.SelectBuilder) yq.SelectBuilder {
-			return r.modifier(builder).Where(yq.Eq{coltName: name})
+			return r.modifier(builder).Where(yq.Eq{colName: name})
 		},
 	)
 	if err != nil {
@@ -234,7 +243,7 @@ func loadAllCaveats(
 		return nil, err
 	}
 
-	sql = common.AddTablePrefix(sql, tablePathPrefix)
+	sql = ydbCommon.AddTablePrefix(sql, tablePathPrefix)
 	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
 	if err != nil {
 		return nil, err
