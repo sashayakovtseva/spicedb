@@ -41,6 +41,8 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 		return fmt.Errorf("failed to delete existing caveats: %w", err)
 	}
 
+	// todo add select ensure?
+
 	sql, args, err := b.ToYdbSql()
 	if err != nil {
 		return fmt.Errorf("failed to build insert caveats query: %w", err)
