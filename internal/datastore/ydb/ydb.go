@@ -8,6 +8,7 @@ import (
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"go.opentelemetry.io/otel"
 
@@ -155,9 +156,32 @@ func (y *ydbDatastore) ReadWriteTx(
 	fn datastore.TxUserFunc,
 	opts ...options.RWTOptionsOption,
 ) (datastore.Revision, error) {
+	config := options.NewRWTOptionsWithOptions(opts...)
 
-	// TODO implement me
-	panic("implement me")
+	txOptions := []table.Option{
+		table.WithTxSettings(table.TxSettings(table.WithSerializableReadWrite())),
+	}
+	if !config.DisableRetries {
+		txOptions = append(txOptions, table.WithIdempotent())
+	}
+
+	// todo use maxRetries!
+	var newRev revisions.TimestampRevision
+	err := y.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		now := truetime.UnixNano()
+		newRev = revisions.NewForTimestamp(now)
+
+		rw := &ydbReadWriter{
+			ydbReader:   newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier),
+			newRevision: newRev,
+		}
+
+		return fn(ctx, rw)
+	}, txOptions...)
+	if err != nil {
+		return datastore.NoRevision, fmt.Errorf("failed to process transaction: %w", err)
+	}
+	return newRev, nil
 }
 
 func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {

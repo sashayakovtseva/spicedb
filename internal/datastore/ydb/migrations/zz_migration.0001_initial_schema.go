@@ -43,6 +43,7 @@ CREATE TABLE namespace_config (
 );`
 
 	// todo AUTO_PARTITIONING_BY_LOAD?
+	// todo remove uq_caveat_living?
 	createCaveat = `
 CREATE TABLE caveat (
 	name Utf8 NOT NULL,
