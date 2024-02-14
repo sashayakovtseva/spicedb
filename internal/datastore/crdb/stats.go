@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/Masterminds/squirrel"
+	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
@@ -65,7 +65,7 @@ func (cds *crdbDatastore) Statistics(ctx context.Context) (datastore.Stats, erro
 		if err != nil {
 			return fmt.Errorf("unable to read namespaces: %w", err)
 		}
-		nsDefs, err = loadAllNamespaces(ctx, pgxcommon.QuerierFuncsFor(tx), func(sb squirrel.SelectBuilder, fromStr string) squirrel.SelectBuilder {
+		nsDefs, err = loadAllNamespaces(ctx, pgxcommon.QuerierFuncsFor(tx), func(sb sq.SelectBuilder, fromStr string) sq.SelectBuilder {
 			return sb.From(fromStr)
 		})
 		if err != nil {
