@@ -59,12 +59,16 @@ var (
 		common.TupleComparison,
 	)
 
-	livingObjectModifier = queryModifier(func(builder sq.SelectBuilder) sq.SelectBuilder {
-		return builder.Where(sq.Eq{colDeletedAtUnixNano: nil})
+	livingObjectPredicate = sq.Eq{colDeletedAtUnixNano: nil}
+	livingObjectModifier  = queryModifier(func(builder sq.SelectBuilder) sq.SelectBuilder {
+		return builder.Where(livingObjectPredicate)
 	})
 
+	readCaveatBuilder   = sq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
+	deleteCaveatBuilder = sq.Update(tableCaveat).Where(livingObjectPredicate)
+	insertCaveatBuilder = sq.Insert(tableCaveat).Columns(colName, colDefinition, colCreatedAtUnixNano)
+
 	readNamespaceBuilder = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
-	readCaveatBuilder    = sq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
 	readRelationBuilder  = sq.Select(
 		colNamespace,
 		colObjectID,

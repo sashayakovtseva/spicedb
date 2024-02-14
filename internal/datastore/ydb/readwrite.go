@@ -2,51 +2,104 @@ package ydb
 
 import (
 	"context"
+	"fmt"
 
+	sq "github.com/Masterminds/squirrel"
 	v1 "github.com/authzed/authzed-go/proto/authzed/api/v1"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
 	"github.com/authzed/spicedb/internal/datastore/revisions"
+	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
 type ydbReadWriter struct {
 	*ydbReader
-	executor    queryExecutor
 	newRevision revisions.TimestampRevision
 }
 
-func (y *ydbReadWriter) WriteCaveats(ctx context.Context, definitions []*core.CaveatDefinition) error {
+func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.CaveatDefinition) error {
+	if len(caveats) == 0 {
+		return nil
+	}
+
+	b := insertCaveatBuilder
+	caveatNames := make([]string, 0, len(caveats))
+	for _, caveat := range caveats {
+		definitionBytes, err := caveat.MarshalVT()
+		if err != nil {
+			return fmt.Errorf("failed to marshal caveat definition: %w", err)
+		}
+
+		valuesToWrite := []any{caveat.Name, definitionBytes, rw.newRevision}
+		b = b.Values(valuesToWrite...)
+		caveatNames = append(caveatNames, caveat.Name)
+	}
+
+	if err := rw.deleteCaveatsByNames(ctx, caveatNames); err != nil {
+		return fmt.Errorf("failed to delete existing caveats: %w", err)
+	}
+
+	sql, args, err := b.ToYdbSql()
+	if err != nil {
+		return fmt.Errorf("failed to build insert caveats query: %w", err)
+	}
+
+	sql = ydbCommon.AddTablePrefix(sql, rw.tablePathPrefix)
+	res, err := rw.executor.Execute(ctx, sql, table.NewQueryParameters(args...))
+	if err != nil {
+		return fmt.Errorf("failed to insert caveats: %w", err)
+	}
+	defer res.Close()
+
+	return nil
+}
+
+func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) error {
+	return rw.deleteCaveatsByNames(ctx, names)
+}
+
+func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (y *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) error {
+func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.RelationshipFilter) error {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (y *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
+func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, newConfigs ...*core.NamespaceDefinition) error {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (y *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.RelationshipFilter) error {
+func (rw *ydbReadWriter) DeleteNamespaces(ctx context.Context, nsNames ...string) error {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (y *ydbReadWriter) WriteNamespaces(ctx context.Context, newConfigs ...*core.NamespaceDefinition) error {
+func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteRelationshipSource) (uint64, error) {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (y *ydbReadWriter) DeleteNamespaces(ctx context.Context, nsNames ...string) error {
-	// TODO implement me
-	panic("implement me")
-}
+func (rw *ydbReadWriter) deleteCaveatsByNames(ctx context.Context, names []string) error {
+	sql, args, err := deleteCaveatBuilder.
+		Set(colDeletedAtUnixNano, rw.newRevision).
+		Where(sq.Eq{colCaveatName: names}).
+		ToYdbSql()
+	if err != nil {
+		return fmt.Errorf("failed to build delete caveats query: %w", err)
+	}
 
-func (y *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteRelationshipSource) (uint64, error) {
-	// TODO implement me
-	panic("implement me")
+	sql = ydbCommon.AddTablePrefix(sql, rw.tablePathPrefix)
+	res, err := rw.executor.Execute(ctx, sql, table.NewQueryParameters(args...))
+	if err != nil {
+		return fmt.Errorf("failed to delete caveats: %w", err)
+	}
+	defer res.Close()
+
+	return nil
 }
