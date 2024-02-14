@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/Masterminds/squirrel"
+	sq "github.com/Masterminds/squirrel"
 
 	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/pkg/datastore"
@@ -36,7 +36,7 @@ func (mds *Datastore) Statistics(ctx context.Context) (datastore.Stats, error) {
 	query, args, err := sb.
 		Select(informationSchemaTableRowsColumn).
 		From(informationSchemaTablesTable).
-		Where(squirrel.Eq{informationSchemaTableNameColumn: mds.driver.RelationTuple()}).
+		Where(sq.Eq{informationSchemaTableNameColumn: mds.driver.RelationTuple()}).
 		ToSql()
 	if err != nil {
 		return datastore.Stats{}, err
@@ -61,7 +61,7 @@ func (mds *Datastore) Statistics(ctx context.Context) (datastore.Stats, error) {
 		}
 	}
 
-	nsQuery := mds.ReadNamespaceQuery.Where(squirrel.Eq{colDeletedTxn: liveDeletedTxnID})
+	nsQuery := mds.ReadNamespaceQuery.Where(sq.Eq{colDeletedTxn: liveDeletedTxnID})
 
 	tx, err := mds.db.BeginTx(ctx, nil)
 	if err != nil {
