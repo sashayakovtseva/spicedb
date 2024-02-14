@@ -600,12 +600,35 @@ func TestYDBReaderRelationships(t *testing.T) {
 		}
 	}
 
+	testReverseQueryRelationships := func(
+		t *testing.T,
+		r datastore.Reader,
+		f datastore.SubjectsFilter,
+		expect ...testRelationship,
+	) {
+		it, err := r.ReverseQueryRelationships(context.Background(), f)
+		require.NoError(t, err)
+		t.Cleanup(it.Close)
+
+		var actual []*core.RelationTuple
+		for v := it.Next(); v != nil; v = it.Next() {
+			actual = append(actual, v)
+		}
+		require.Len(t, actual, len(expect))
+		for i := range expect {
+			matchRelationship(t, expect[i], actual[i])
+		}
+	}
+
 	t.Run("removed relationships not garbage collected", func(t *testing.T) {
 		testRevision := revisions.NewForTimestamp(6)
 		r := ds.SnapshotReader(testRevision)
 		testQueryRelationships(t, r, datastore.RelationshipsFilter{
 			ResourceType:             "document",
 			OptionalResourceRelation: "writer",
+		}, testRelationships[2])
+		testReverseQueryRelationships(t, r, datastore.SubjectsFilter{
+			SubjectType: "user",
 		}, testRelationships[2])
 	})
 
@@ -615,6 +638,13 @@ func TestYDBReaderRelationships(t *testing.T) {
 		testQueryRelationships(t, r, datastore.RelationshipsFilter{
 			ResourceType:             "document",
 			OptionalResourceRelation: "reader",
+		}, testRelationships[0])
+		testReverseQueryRelationships(t, r, datastore.SubjectsFilter{
+			SubjectType:        "user",
+			OptionalSubjectIds: []string{"bob"},
+			RelationFilter: datastore.SubjectRelationFilter{
+				IncludeEllipsisRelation: true,
+			},
 		}, testRelationships[0])
 	})
 }
