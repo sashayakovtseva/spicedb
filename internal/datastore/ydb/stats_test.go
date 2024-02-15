@@ -10,14 +10,11 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
-	testserverDatastore "github.com/authzed/spicedb/internal/testserver/datastore"
 	"github.com/authzed/spicedb/pkg/datastore"
 )
 
 func TestYDBDatastoreStatistics(t *testing.T) {
-	engine := testserverDatastore.RunYDBForTesting(t, "")
-
-	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+	ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
 		ds, err := NewYDBDatastore(context.Background(), dsn)
 		require.NoError(t, err)
 
