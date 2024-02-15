@@ -151,6 +151,18 @@ func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Rea
 	)
 }
 
+// ReadWriteTx starts a read/write transaction, which will be committed if no error is
+// returned and rolled back if an error is returned.
+// Important note from YDB docs:
+//
+//	All changes made during the transaction accumulate in the database server memory
+//	and are applied when the transaction completes. If the locks are not invalidated,
+//	all the changes accumulated are committed atomically; if at least one lock is
+//	invalidated, none of the changes committed. The above model involves certain
+//	restrictions: changes made by a single transaction must fit inside available
+//	memory, and a transaction "doesn't see" its changes.
+//
+// todo verify all ReadWriteTx usages order reads before writes.
 func (y *ydbDatastore) ReadWriteTx(
 	ctx context.Context,
 	fn datastore.TxUserFunc,
@@ -165,9 +177,12 @@ func (y *ydbDatastore) ReadWriteTx(
 		txOptions = append(txOptions, table.WithIdempotent())
 	}
 
-	// todo use maxRetries!
+	// todo use maxRetries somehow.
 	var newRev revisions.TimestampRevision
 	err := y.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		// this is actually a BAD way to do mvcc which may lead to new enemy problem.
+		// we MUST choose revision at the moment of commit,
+		// but YDB is not Spanner, so this is the best effort possible.
 		now := truetime.UnixNano()
 		newRev = revisions.NewForTimestamp(now)
 
