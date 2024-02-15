@@ -16,6 +16,8 @@ import (
 // For convenience, secondary indexes for uniqueness check start with `uq_` prefix.
 // YDB also doesn't support partial secondary indexes.
 // Table's PK columns are always implicitly saved in secondary index as well.
+//
+// YDB also doesn't support PK update. Given that, PK differ a lot from other datastore implementations.
 const (
 	createSchemaVersion = `
 CREATE TABLE schema_version (
@@ -44,13 +46,16 @@ CREATE TABLE namespace_config (
 
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	// todo remove uq_caveat_living?
+	// ideally PK should be (name, deleted_at_unix_nano), but since deleted_at_unix_nano is
+	// updated during delete operation it cannot be used. simply (name) is also not applicable
+	// b/c here might be deleted caveats with the same name as currently living.
 	createCaveat = `
 CREATE TABLE caveat (
 	name Utf8 NOT NULL,
 	definition String NOT NULL,
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
-	PRIMARY KEY (name, created_at_unix_nano, deleted_at_unix_nano),
+	PRIMARY KEY (name, created_at_unix_nano),
 	INDEX uq_caveat_living GLOBAL SYNC ON (name, deleted_at_unix_nano)
 );`
 
