@@ -6,15 +6,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v3/docker"
 	"github.com/stretchr/testify/require"
 
-	ydbDatastore "github.com/authzed/spicedb/internal/datastore/ydb"
 	ydbMigrations "github.com/authzed/spicedb/internal/datastore/ydb/migrations"
 	"github.com/authzed/spicedb/pkg/secrets"
 
@@ -33,7 +34,7 @@ type ydbTester struct {
 	bridgeNetworkName string
 
 	hostname string
-	port     string
+	port     int
 }
 
 // RunYDBForTesting returns a RunningEngineForTest for YDB.
@@ -41,15 +42,8 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 	pool, err := dockertest.NewPool("")
 	require.NoError(t, err)
 
-	containerName := fmt.Sprintf("ydb-%s", uuid.New().String())
-	hostname := "localhost"
-	if bridgeNetworkName != "" {
-		hostname = containerName
-	}
-
-	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Name:       containerName,
-		Hostname:   hostname,
+	ydbContainerOptions := &dockertest.RunOptions{
+		Name:       fmt.Sprintf("ydb-%s", uuid.New().String()),
 		Repository: "ghcr.io/ydb-platform/local-ydb",
 		Tag:        ydbTestVersionTag,
 		Env: []string{
@@ -57,9 +51,32 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 			"YDB_FEATURE_FLAGS=enable_not_null_data_columns",
 		},
 		NetworkID: bridgeNetworkName,
-	})
+	}
+
+	var ydbPort int
+
+	// hostname must be resolvable from withing the network where tests are run.
+	// we need to match hostPort with containerPort due to cluster discovery.
+	if bridgeNetworkName != "" {
+		ydbPort = ydbGRPCPort
+		ydbContainerOptions.Hostname = ydbContainerOptions.Name
+		ydbContainerOptions.PortBindings = nil
+	} else {
+		ydbPort = getFreePort(t)
+		ydbPortStr := strconv.FormatInt(int64(ydbPort), 10)
+		ydbContainerOptions.Hostname = "localhost"
+		ydbContainerOptions.PortBindings = map[docker.Port][]docker.PortBinding{
+			docker.Port(ydbPortStr + "/tcp"): {{HostPort: ydbPortStr}},
+		}
+		ydbContainerOptions.Env = append(ydbContainerOptions.Env, "GRPC_PORT="+ydbPortStr)
+		ydbContainerOptions.ExposedPorts = []string{ydbPortStr + "/tcp"}
+	}
+
+	resource, err := pool.RunWithOptions(ydbContainerOptions)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, pool.Purge(resource)) })
+	t.Cleanup(func() {
+		require.NoError(t, pool.Purge(resource))
+	})
 
 	// await container is ready.
 	// since YDB has internal cluster discovery we can't check availability from outside network.
@@ -69,7 +86,7 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 		code, err := resource.Exec([]string{
 			"/ydb",
 			"-e",
-			fmt.Sprintf("grpc://localhost:%d", ydbGRPCPort),
+			fmt.Sprintf("grpc://localhost:%d", ydbPort),
 			"-d",
 			"/" + ydbDefaultDatabase,
 			"scheme",
@@ -87,16 +104,11 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 		return nil
 	}))
 
-	port := resource.GetPort(fmt.Sprintf("%d/tcp", ydbGRPCPort))
-	if bridgeNetworkName != "" {
-		port = strconv.FormatInt(ydbGRPCPort, 10)
-	}
-
 	return ydbTester{
 		pool:              pool,
 		bridgeNetworkName: bridgeNetworkName,
-		hostname:          hostname,
-		port:              port,
+		hostname:          ydbContainerOptions.Hostname,
+		port:              ydbPort,
 	}
 }
 
@@ -108,7 +120,7 @@ func (r ydbTester) NewDatabase(t testing.TB) string {
 	require.NoError(t, err)
 
 	directory := fmt.Sprintf("/%s/%s", ydbDefaultDatabase, uniquePortion)
-	dsn := fmt.Sprintf("grpc://%s:%s/%s?table_path_prefix=%s", r.hostname, r.port, ydbDefaultDatabase, directory)
+	dsn := fmt.Sprintf("grpc://%s:%d/%s?table_path_prefix=%s", r.hostname, r.port, ydbDefaultDatabase, directory)
 
 	return dsn
 }
@@ -116,7 +128,7 @@ func (r ydbTester) NewDatabase(t testing.TB) string {
 func (r ydbTester) NewDatastore(t testing.TB, initFunc InitFunc) datastore.Datastore {
 	dsn := r.NewDatabase(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
 	migrationDriver, err := ydbMigrations.NewYDBDriver(ctx, dsn)
@@ -125,5 +137,17 @@ func (r ydbTester) NewDatastore(t testing.TB, initFunc InitFunc) datastore.Datas
 	err = ydbMigrations.YDBMigrations.Run(ctx, migrationDriver, migrate.Head, migrate.LiveRun)
 	require.NoError(t, err)
 
-	return initFunc(ydbDatastore.Engine, dsn)
+	return initFunc("ydb", dsn)
+}
+
+// getFreePort asks the kernel for a free open port that is ready to use.
+func getFreePort(t testing.TB) int {
+	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	require.NoError(t, err)
+
+	l, err := net.ListenTCP("tcp", addr)
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	return l.Addr().(*net.TCPAddr).Port
 }
