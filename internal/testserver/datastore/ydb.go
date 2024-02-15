@@ -124,6 +124,9 @@ func NewYDBEngineForTest(bridgeNetworkName string) (RunningEngineForTest, func()
 		return nil, nil, err
 	}
 
+	// todo find a better way to correctly await YDB container.
+	time.Sleep(time.Second * 5)
+
 	return ydbTester{
 		pool:              pool,
 		bridgeNetworkName: bridgeNetworkName,

@@ -32,7 +32,7 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 			return fmt.Errorf("failed to marshal caveat definition: %w", err)
 		}
 
-		valuesToWrite := []any{caveat.Name, definitionBytes, rw.newRevision}
+		valuesToWrite := []any{caveat.Name, definitionBytes, rw.newRevision.TimestampNanoSec()}
 		b = b.Values(valuesToWrite...)
 		caveatNames = append(caveatNames, caveat.Name)
 	}
@@ -89,8 +89,8 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 
 func (rw *ydbReadWriter) deleteCaveatsByNames(ctx context.Context, names []string) error {
 	sql, args, err := deleteCaveatBuilder.
-		Set(colDeletedAtUnixNano, rw.newRevision).
-		Where(sq.Eq{colCaveatName: names}).
+		Set(colDeletedAtUnixNano, rw.newRevision.TimestampNanoSec()).
+		Where(sq.Eq{colName: names}).
 		ToYdbSql()
 	if err != nil {
 		return fmt.Errorf("failed to build delete caveats query: %w", err)
