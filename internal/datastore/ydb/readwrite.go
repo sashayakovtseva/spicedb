@@ -19,6 +19,8 @@ type ydbReadWriter struct {
 	newRevision revisions.TimestampRevision
 }
 
+// WriteCaveats stores the provided caveats.
+// Currently living caveats with the same names are silently marked as deleted (table range scan operation).
 func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.CaveatDefinition) error {
 	if len(caveats) == 0 {
 		return nil
@@ -58,6 +60,8 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 	return nil
 }
 
+// DeleteCaveats deletes the provided caveats by name.
+// This is a table range scan operation.
 func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) error {
 	return rw.deleteCaveatsByNames(ctx, names)
 }

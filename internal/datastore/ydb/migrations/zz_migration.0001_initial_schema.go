@@ -13,11 +13,15 @@ import (
 //
 //	DISCARD SELECT Ensure(0, false, "duplicate") FROM table VIEW index WHERE id=$Id
 //
-// For convenience, secondary indexes for uniqueness check start with `uq_` prefix.
+// For convenience, secondary indexes that are suitable for uniqueness check start with `uq_` prefix.
+//
 // YDB also doesn't support partial secondary indexes.
 // Table's PK columns are always implicitly saved in secondary index as well.
 //
 // YDB also doesn't support PK update. Given that, PK differ a lot from other datastore implementations.
+//
+// YDB doesn't support automatic secondary index selection, so one should
+// use SELECT VIEW to enable reasonable query time and eliminate full scans.
 const (
 	createSchemaVersion = `
 CREATE TABLE schema_version (
@@ -45,10 +49,10 @@ CREATE TABLE namespace_config (
 );`
 
 	// todo AUTO_PARTITIONING_BY_LOAD?
-	// todo remove uq_caveat_living?
 	// ideally PK should be (name, deleted_at_unix_nano), but since deleted_at_unix_nano is
 	// updated during delete operation it cannot be used. simply (name) is also not applicable
 	// b/c here might be deleted caveats with the same name as currently living.
+	// uq_caveat_living columns order is determined by list caveats queries.
 	createCaveat = `
 CREATE TABLE caveat (
 	name Utf8 NOT NULL,
@@ -56,7 +60,7 @@ CREATE TABLE caveat (
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (name, created_at_unix_nano),
-	INDEX uq_caveat_living GLOBAL SYNC ON (name, deleted_at_unix_nano)
+	INDEX uq_caveat_living GLOBAL SYNC ON (deleted_at_unix_nano, name) COVER (definition)
 );`
 
 	// todo discuss JsonDocument instead of Json.

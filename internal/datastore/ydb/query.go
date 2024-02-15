@@ -32,9 +32,10 @@ const (
 	colSerializedConfig  = "serialized_config"
 
 	// caveat
-	tableCaveat   = "caveat"
-	colName       = "name"
-	colDefinition = "definition"
+	tableCaveat      = "caveat"
+	colName          = "name"
+	colDefinition    = "definition"
+	ixUqCaveatLiving = "uq_caveat_living"
 
 	// relation_tuple
 	tableRelationTuple  = "relation_tuple"

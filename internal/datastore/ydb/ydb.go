@@ -148,6 +148,7 @@ func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Rea
 		y.config.tablePathPrefix,
 		sessionQueryExecutor{driver: y.driver},
 		revisionedQueryModifier(rev),
+		true,
 	)
 }
 
@@ -187,7 +188,7 @@ func (y *ydbDatastore) ReadWriteTx(
 		newRev = revisions.NewForTimestamp(now)
 
 		rw := &ydbReadWriter{
-			ydbReader:   newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier),
+			ydbReader:   newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier, false),
 			newRevision: newRev,
 		}
 
