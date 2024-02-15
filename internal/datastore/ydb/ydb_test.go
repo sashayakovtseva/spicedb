@@ -4,15 +4,35 @@ package ydb
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	log "github.com/authzed/spicedb/internal/logging"
 	testdatastore "github.com/authzed/spicedb/internal/testserver/datastore"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/test"
 )
+
+var ydbTestEngine testdatastore.RunningEngineForTest
+
+func TestMain(m *testing.M) {
+	var (
+		err     error
+		cleanup func()
+	)
+
+	ydbTestEngine, cleanup, err = testdatastore.NewYDBEngineForTest("")
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create test ydb engine")
+	}
+
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
+}
 
 func TestYDBDatastore(t *testing.T) {
 	t.Skip("unimplemented datastore")
