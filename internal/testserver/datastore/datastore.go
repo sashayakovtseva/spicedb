@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/authzed/spicedb/internal/datastore/postgres/version"
-	ydbDatastore "github.com/authzed/spicedb/internal/datastore/ydb"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/migrate"
 )
@@ -69,7 +68,7 @@ func RunDatastoreEngineWithBridge(t testing.TB, engine string, bridgeNetworkName
 		return RunMySQLForTesting(t, bridgeNetworkName)
 	case "spanner":
 		return RunSpannerForTesting(t, bridgeNetworkName, migrate.Head)
-	case ydbDatastore.Engine:
+	case "ydb":
 		return RunYDBForTesting(t, bridgeNetworkName)
 	default:
 		t.Fatalf("found missing engine for RunDatastoreEngine: %s", engine)
