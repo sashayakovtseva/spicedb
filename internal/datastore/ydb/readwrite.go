@@ -39,11 +39,10 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 		caveatNames = append(caveatNames, caveat.Name)
 	}
 
+	// note: there's no need in select ensure with this removal.
 	if err := rw.deleteCaveatsByNames(ctx, caveatNames); err != nil {
 		return fmt.Errorf("failed to delete existing caveats: %w", err)
 	}
-
-	// todo add select ensure?
 
 	sql, args, err := b.ToYdbSql()
 	if err != nil {
