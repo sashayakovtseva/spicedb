@@ -18,6 +18,7 @@ type ydbConfig struct {
 	gcInterval         time.Duration
 	gcMaxOperationTime time.Duration
 
+	// todo find a way to use it
 	maxRetries uint8
 
 	gcEnabled             bool

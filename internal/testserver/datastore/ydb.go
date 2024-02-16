@@ -39,8 +39,18 @@ type ydbTester struct {
 
 // RunYDBForTesting returns a RunningEngineForTest for YDB.
 func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTest {
-	pool, err := dockertest.NewPool("")
+	e, cleanup, err := NewYDBEngineForTest(bridgeNetworkName)
 	require.NoError(t, err)
+	t.Cleanup(cleanup)
+	return e
+}
+
+// NewYDBEngineForTest returns a RunningEngineForTest for YDB.
+func NewYDBEngineForTest(bridgeNetworkName string) (RunningEngineForTest, func(), error) {
+	pool, err := dockertest.NewPool("")
+	if err != nil {
+		return nil, nil, err
+	}
 
 	ydbContainerOptions := &dockertest.RunOptions{
 		Name:       fmt.Sprintf("ydb-%s", uuid.New().String()),
@@ -62,7 +72,11 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 		ydbContainerOptions.Hostname = ydbContainerOptions.Name
 		ydbContainerOptions.PortBindings = nil
 	} else {
-		ydbPort = getFreePort(t)
+		ydbPort, err = getFreePort()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		ydbPortStr := strconv.FormatInt(int64(ydbPort), 10)
 		ydbContainerOptions.Hostname = "localhost"
 		ydbContainerOptions.PortBindings = map[docker.Port][]docker.PortBinding{
@@ -73,14 +87,17 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 	}
 
 	resource, err := pool.RunWithOptions(ydbContainerOptions)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, pool.Purge(resource))
-	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		_ = pool.Purge(resource)
+	}
 
 	// await container is ready.
 	// since YDB has internal cluster discovery we can't check availability from outside network.
-	require.NoError(t, pool.Retry(func() error {
+	if err := pool.Retry(func() error {
 		var buf bytes.Buffer
 
 		code, err := resource.Exec([]string{
@@ -102,14 +119,20 @@ func RunYDBForTesting(t testing.TB, bridgeNetworkName string) RunningEngineForTe
 		}
 
 		return nil
-	}))
+	}); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+
+	// todo find a better way to correctly await YDB container.
+	time.Sleep(time.Second * 5)
 
 	return ydbTester{
 		pool:              pool,
 		bridgeNetworkName: bridgeNetworkName,
 		hostname:          ydbContainerOptions.Hostname,
 		port:              ydbPort,
-	}
+	}, cleanup, nil
 }
 
 func (r ydbTester) NewDatabase(t testing.TB) string {
@@ -141,13 +164,20 @@ func (r ydbTester) NewDatastore(t testing.TB, initFunc InitFunc) datastore.Datas
 }
 
 // getFreePort asks the kernel for a free open port that is ready to use.
-func getFreePort(t testing.TB) int {
+func getFreePort() (int, error) {
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
-	require.NoError(t, err)
+	if err != nil {
+		return 0, err
+	}
 
 	l, err := net.ListenTCP("tcp", addr)
-	require.NoError(t, err)
-	require.NoError(t, l.Close())
+	if err != nil {
+		return 0, err
+	}
 
-	return l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		return 0, err
+	}
+
+	return l.Addr().(*net.TCPAddr).Port, nil
 }

@@ -8,6 +8,7 @@ import (
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"go.opentelemetry.io/otel"
 
@@ -147,17 +148,56 @@ func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Rea
 		y.config.tablePathPrefix,
 		sessionQueryExecutor{driver: y.driver},
 		revisionedQueryModifier(rev),
+		true,
 	)
 }
 
+// ReadWriteTx starts a read/write transaction, which will be committed if no error is
+// returned and rolled back if an error is returned.
+// Important note from YDB docs:
+//
+//	All changes made during the transaction accumulate in the database server memory
+//	and are applied when the transaction completes. If the locks are not invalidated,
+//	all the changes accumulated are committed atomically; if at least one lock is
+//	invalidated, none of the changes committed. The above model involves certain
+//	restrictions: changes made by a single transaction must fit inside available
+//	memory, and a transaction "doesn't see" its changes.
+//
+// todo verify all ReadWriteTx usages order reads before writes.
 func (y *ydbDatastore) ReadWriteTx(
 	ctx context.Context,
 	fn datastore.TxUserFunc,
 	opts ...options.RWTOptionsOption,
 ) (datastore.Revision, error) {
+	config := options.NewRWTOptionsWithOptions(opts...)
 
-	// TODO implement me
-	panic("implement me")
+	txOptions := []table.Option{
+		table.WithTxSettings(table.TxSettings(table.WithSerializableReadWrite())),
+	}
+	if !config.DisableRetries {
+		txOptions = append(txOptions, table.WithIdempotent())
+	}
+
+	// todo use maxRetries somehow.
+	var newRev revisions.TimestampRevision
+	err := y.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		// this is actually a BAD way to do mvcc which may lead to new enemy problem.
+		// we MUST choose revision at the moment of commit,
+		// but YDB is not Spanner, so this is the best effort possible.
+		now := truetime.UnixNano()
+		newRev = revisions.NewForTimestamp(now)
+
+		rw := &ydbReadWriter{
+			ydbReader:   newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier, false),
+			newRevision: newRev,
+		}
+
+		return fn(ctx, rw)
+	}, txOptions...)
+	if err != nil {
+		return datastore.NoRevision, fmt.Errorf("failed to process transaction: %w", err)
+	}
+	return newRev, nil
 }
 
 func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
