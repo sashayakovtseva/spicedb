@@ -123,8 +123,9 @@ func TestYDBReaderNamespaces(t *testing.T) {
 		lastWrittenRevision datastore.Revision
 	}
 
-	matchNamspace := func(t *testing.T, expect expectNs, actual datastore.RevisionedNamespace) {
+	matchNamespace := func(t *testing.T, expect expectNs, actual datastore.RevisionedNamespace) {
 		require.Equal(t, expect.lastWrittenRevision, actual.LastWrittenRevision)
+		require.Equal(t, expect.name, actual.Definition.GetName())
 		actualRelations := lo.Map(actual.Definition.GetRelation(), func(item *core.Relation, index int) string {
 			return item.GetName()
 		})
@@ -138,7 +139,7 @@ func TestYDBReaderNamespaces(t *testing.T) {
 		for _, ns := range nss {
 			expectNs, ok := expectNs[ns.Definition.GetName()]
 			require.True(t, ok)
-			matchNamspace(t, expectNs, ns)
+			matchNamespace(t, expectNs, ns)
 		}
 	}
 
@@ -154,7 +155,7 @@ func TestYDBReaderNamespaces(t *testing.T) {
 		for _, ns := range nss {
 			expectNs, ok := expect[ns.Definition.GetName()]
 			require.True(t, ok)
-			matchNamspace(t, expectNs, ns)
+			matchNamespace(t, expectNs, ns)
 		}
 	}
 
@@ -165,7 +166,7 @@ func TestYDBReaderNamespaces(t *testing.T) {
 			return
 		}
 		require.NoError(t, err)
-		matchNamspace(t, expect, datastore.RevisionedNamespace{
+		matchNamespace(t, expect, datastore.RevisionedNamespace{
 			Definition:          ns,
 			LastWrittenRevision: lastWritten,
 		})
@@ -220,5 +221,204 @@ func TestYDBReaderNamespaces(t *testing.T) {
 		testListAllNamespaces(t, r, expectedNs)
 		testReadNamespaceByName(t, r, expectedNs["user"])
 		testLookupNamespacesWithNames(t, r, []string{"user", "document"}, nil)
+	})
+}
+
+func TestYDBReaderCaveats(t *testing.T) {
+	engine := testserverDatastore.RunYDBForTesting(t, "")
+
+	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+		ds, err := NewYDBDatastore(context.Background(), dsn)
+		require.NoError(t, err)
+
+		yDS, err := newYDBDatastore(context.Background(), dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { yDS.Close() })
+
+		err = yDS.driver.Table().Do(context.Background(), func(ctx context.Context, s table.Session) error {
+			testCaveat := []struct {
+				name         string
+				configBase64 string
+				createdAt    int64
+				deletedAt    *int64
+			}{
+				{
+					name: "one",
+					configBase64: "CgNvbmUScRIDb25lCmoSDAgCEggaBmVxdWFscxIHCAESAwoBdhoGCAMSAhgCGgYIAhICGAEaBggB" +
+						"EgIYAiIbEAIyFxIEXz09XxoHEAEiAwoBdhoGEAMaAhgBKhwSA29uZRoDFB0eIgQIAhAYIgQIAxAb" +
+						"IgQIARAWGgoKAXYSBQoDaW50KgA=",
+					createdAt: 1,
+					deletedAt: proto.Int64(7),
+				},
+				{
+					name: "two",
+					configBase64: "CgN0d28SdBIDdHdvCm0SBwgBEgMKAXYSDAgCEggaBmVxdWFscxoGCAMSAhgCGgYIAhICGAEaBggB" +
+						"EgIYAiIbEAIyFxIEXz09XxoHEAEiAwoBdhoGEAMaAhgCKh8SA3R3bxoGMDEyMzw9IgQIARA1IgQI" +
+						"AhA3IgQIAxA6GgoKAXYSBQoDaW50KgIIAw==",
+					createdAt: 1,
+					deletedAt: proto.Int64(7),
+				},
+				{
+					name: "three",
+					configBase64: "CgV0aHJlZRJ7EgV0aHJlZQpyEgcIARIDCgF2EgwIAhIIGgZlcXVhbHMaBggDEgIYAhoGCAISAhgB" +
+						"GgYIARICGAIiGxACMhcSBF89PV8aBxABIgMKAXYaBhADGgIYAyokEgV0aHJlZRoJTk9QUVJTVF1e" +
+						"IgQIARBWIgQIAhBYIgQIAxBbGgoKAXYSBQoDaW50KgIIBg==",
+					createdAt: 10,
+				},
+				{
+					name: "four",
+					configBase64: "CgRmb3VyEnwSBGZvdXIKdBIHCAESAwoBdhIMCAISCBoGZXF1YWxzGgYIARICGAIaBggDEgIYAhoG" +
+						"CAISAhgBIhsQAjIXEgRfPT1fGgcQASIDCgF2GgYQAxoCGAQqJhIEZm91choMa2xtbm9wcXJzdH1+" +
+						"IgQIARB2IgQIAhB4IgQIAxB7GgoKAXYSBQoDaW50KgIICQ==",
+					createdAt: 10,
+				},
+			}
+
+			stmt, err := s.Prepare(
+				ctx,
+				common.AddTablePrefix(`
+					DECLARE $name AS Utf8;
+					DECLARE $config AS String;
+					DECLARE $createdAt AS Int64;
+					DECLARE $deletedAt AS Optional<Int64>;
+					INSERT INTO
+						caveat(name, definition, created_at_unix_nano, deleted_at_unix_nano)
+					VALUES 
+						($name, $config, $createdAt, $deletedAt);
+				`, yDS.config.tablePathPrefix),
+			)
+			if err != nil {
+				return err
+			}
+
+			for i := 0; i < len(testCaveat); i++ {
+				conf, err := base64.StdEncoding.DecodeString(testCaveat[i].configBase64)
+				if err != nil {
+					return err
+				}
+
+				_, _, err = stmt.Execute(
+					ctx,
+					table.DefaultTxControl(),
+					table.NewQueryParameters(
+						table.ValueParam("$name", types.UTF8Value(testCaveat[i].name)),
+						table.ValueParam("$config", types.BytesValue(conf)),
+						table.ValueParam("$createdAt", types.Int64Value(testCaveat[i].createdAt)),
+						table.ValueParam("$deletedAt", types.NullableInt64Value(testCaveat[i].deletedAt)),
+					),
+				)
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		return ds
+	})
+	t.Cleanup(func() { ds.Close() })
+
+	type expectCaveat struct {
+		name                string
+		lastWrittenRevision datastore.Revision
+	}
+
+	matchCaveat := func(t *testing.T, expect expectCaveat, actual datastore.RevisionedCaveat) {
+		require.Equal(t, expect.lastWrittenRevision, actual.LastWrittenRevision)
+		require.Equal(t, expect.name, actual.Definition.GetName())
+	}
+
+	testListAllCaveats := func(t *testing.T, r datastore.Reader, expectCaveat map[string]expectCaveat) {
+		vv, err := r.ListAllCaveats(context.Background())
+		require.NoError(t, err)
+		require.Len(t, vv, len(expectCaveat))
+		for _, v := range vv {
+			expectCaveat, ok := expectCaveat[v.Definition.GetName()]
+			require.True(t, ok)
+			matchCaveat(t, expectCaveat, v)
+		}
+	}
+
+	testLookupCaveatsWithNames := func(
+		t *testing.T,
+		r datastore.Reader,
+		in []string,
+		expect map[string]expectCaveat,
+	) {
+		vv, err := r.LookupCaveatsWithNames(context.Background(), in)
+		require.NoError(t, err)
+		require.Len(t, vv, len(expect))
+		for _, v := range vv {
+			expectCaveat, ok := expect[v.Definition.GetName()]
+			require.True(t, ok)
+			matchCaveat(t, expectCaveat, v)
+		}
+	}
+
+	testReadCaveatByName := func(t *testing.T, r datastore.Reader, expect expectCaveat) {
+		v, lastWritten, err := r.ReadCaveatByName(context.Background(), expect.name)
+		if expect.name == "" {
+			require.ErrorAs(t, err, new(datastore.ErrNotFound))
+			return
+		}
+		require.NoError(t, err)
+		matchCaveat(t, expect, datastore.RevisionedCaveat{
+			Definition:          v,
+			LastWrittenRevision: lastWritten,
+		})
+	}
+
+	t.Run("removed caveats not garbage collected", func(t *testing.T) {
+		testRevision := revisions.NewForTimestamp(6)
+		expectedNs := map[string]expectCaveat{
+			"one": {
+				name:                "one",
+				lastWrittenRevision: revisions.NewForTimestamp(1),
+			},
+			"two": {
+				name:                "two",
+				lastWrittenRevision: revisions.NewForTimestamp(1),
+			},
+		}
+		r := ds.SnapshotReader(testRevision)
+
+		testListAllCaveats(t, r, expectedNs)
+		testReadCaveatByName(t, r, expectedNs["onw"])
+		testLookupCaveatsWithNames(t, r,
+			[]string{"one", "unknown"},
+			map[string]expectCaveat{"one": expectedNs["one"]},
+		)
+	})
+
+	t.Run("latest caveats", func(t *testing.T) {
+		testRevision := revisions.NewForTimestamp(10)
+		expectedNs := map[string]expectCaveat{
+			"three": {
+				name:                "three",
+				lastWrittenRevision: revisions.NewForTimestamp(10),
+			},
+			"four": {
+				name:                "four",
+				lastWrittenRevision: revisions.NewForTimestamp(10),
+			},
+		}
+		r := ds.SnapshotReader(testRevision)
+		testListAllCaveats(t, r, expectedNs)
+		testReadCaveatByName(t, r, expectedNs["four"])
+		testLookupCaveatsWithNames(t, r,
+			[]string{"four", "unknown"},
+			map[string]expectCaveat{"four": expectedNs["four"]},
+		)
+	})
+
+	t.Run("no caveats", func(t *testing.T) {
+		testRevision := revisions.NewForTimestamp(7)
+		expectedNs := map[string]expectCaveat{}
+		r := ds.SnapshotReader(testRevision)
+		testListAllCaveats(t, r, expectedNs)
+		testReadCaveatByName(t, r, expectedNs["one"])
+		testLookupCaveatsWithNames(t, r, []string{"one", "two"}, nil)
 	})
 }
