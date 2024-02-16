@@ -2,48 +2,90 @@ package ydb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	yq "github.com/flymedllva/ydb-go-qb/yqb"
+	sq "github.com/Masterminds/squirrel"
+	"github.com/samber/lo"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
+	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
+	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
+	corev1 "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
 const (
+	// common
 	colCreatedAtUnixNano = "created_at_unix_nano"
 	colDeletedAtUnixNano = "deleted_at_unix_nano"
+	colNamespace         = "namespace"
 
 	// namespace_config
 	tableNamespaceConfig = "namespace_config"
 	colSerializedConfig  = "serialized_config"
-	colNamespace         = "namespace"
 
 	// caveat
 	tableCaveat   = "caveat"
-	coltName      = "name"
+	colName       = "name"
 	colDefinition = "definition"
+
+	// relation_tuple
+	tableRelationTuple  = "relation_tuple"
+	colObjectID         = "object_id"
+	colRelation         = "relation"
+	colUsersetNamespace = "userset_namespace"
+	colUsersetObjectID  = "userset_object_id"
+	colUsersetRelation  = "userset_relation"
+	colCaveatName       = "caveat_name"
+	colCaveatContext    = "caveat_context"
 )
 
 var (
-	livingObjectModifier = queryModifier(func(builder yq.SelectBuilder) yq.SelectBuilder {
-		return builder.Where(yq.Eq{colDeletedAtUnixNano: nil})
+	relationTupleSchema = common.NewSchemaInformation(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		common.TupleComparison,
+	)
+
+	livingObjectModifier = queryModifier(func(builder sq.SelectBuilder) sq.SelectBuilder {
+		return builder.Where(sq.Eq{colDeletedAtUnixNano: nil})
 	})
+
+	readNamespaceBuilder = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
+	readCaveatBuilder    = sq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
+	readRelationBuilder  = sq.Select(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		colCaveatContext,
+	).From(tableRelationTuple)
 )
 
-type queryModifier func(yq.SelectBuilder) yq.SelectBuilder
+type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
 
 func revisionedQueryModifier(revision revisions.TimestampRevision) queryModifier {
-	return func(builder yq.SelectBuilder) yq.SelectBuilder {
+	return func(builder sq.SelectBuilder) sq.SelectBuilder {
 		return builder.
-			Where(yq.LtOrEq{colCreatedAtUnixNano: revision.TimestampNanoSec()}).
-			Where(yq.Or{
-				yq.Eq{colDeletedAtUnixNano: nil},
-				yq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()},
+			Where(sq.LtOrEq{colCreatedAtUnixNano: revision.TimestampNanoSec()}).
+			Where(sq.Or{
+				sq.Eq{colDeletedAtUnixNano: nil},
+				sq.Gt{colDeletedAtUnixNano: revision.TimestampNanoSec()},
 			})
 	}
 }
@@ -110,4 +152,95 @@ func queryRow(
 	}
 
 	return nil
+}
+
+func toYQLWrapper(b sq.SelectBuilder) (string, []any, error) {
+	query, yqlParams, err := b.ToYdbSql()
+	if err != nil {
+		return "", nil, err
+	}
+
+	// todo think how to get rid of this at all.
+	genericArgs := make([]any, len(yqlParams))
+	for i := range yqlParams {
+		genericArgs[i] = yqlParams[i]
+	}
+
+	return query, genericArgs, nil
+}
+
+func newYDBCommonQueryExecutor(tablePathPrefix string, ydbExecutor queryExecutor) common.ExecuteQueryFunc {
+	return func(ctx context.Context, sql string, args []any) ([]*corev1.RelationTuple, error) {
+		span := trace.SpanFromContext(ctx)
+		return queryTuples(ctx, tablePathPrefix, sql, args, span, ydbExecutor)
+	}
+}
+
+// queryTuples queries tuples for the given query and transaction.
+func queryTuples(
+	ctx context.Context,
+	tablePathPrefix string,
+	query string,
+	args []any,
+	span trace.Span,
+	ydbExecutor queryExecutor,
+) ([]*corev1.RelationTuple, error) {
+	params := table.NewQueryParameters()
+	for _, a := range args {
+		params.Add(a.(table.ParameterOption))
+	}
+
+	query = ydbCommon.AddTablePrefix(query, tablePathPrefix)
+	res, err := ydbExecutor.Execute(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute relation tuples query: %w", err)
+	}
+	defer res.Close()
+
+	span.AddEvent("Query issued to database")
+
+	var tuples []*corev1.RelationTuple
+	for res.NextResultSet(ctx) {
+		for res.NextRow() {
+			nextTuple := &corev1.RelationTuple{
+				ResourceAndRelation: &corev1.ObjectAndRelation{},
+				Subject:             &corev1.ObjectAndRelation{},
+			}
+			var caveatName *string
+			var caveatCtx *[]byte
+			err := res.Scan(
+				&nextTuple.ResourceAndRelation.Namespace,
+				&nextTuple.ResourceAndRelation.ObjectId,
+				&nextTuple.ResourceAndRelation.Relation,
+				&nextTuple.Subject.Namespace,
+				&nextTuple.Subject.ObjectId,
+				&nextTuple.Subject.Relation,
+				&caveatName,
+				&caveatCtx,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to scan relation tuple: %w", err)
+			}
+
+			var structuredCtx map[string]any
+			if caveatCtx != nil {
+				if err := json.Unmarshal(*caveatCtx, &structuredCtx); err != nil {
+					return nil, fmt.Errorf("failed to unmarhsla relation tuple caveat context: %w", err)
+				}
+			}
+
+			nextTuple.Caveat, err = common.ContextualizedCaveatFrom(lo.FromPtr(caveatName), structuredCtx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create relation tuple caveat: %w", err)
+			}
+			tuples = append(tuples, nextTuple)
+		}
+	}
+
+	if err := res.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read relation tuples: %w", err)
+	}
+
+	span.AddEvent("Tuples loaded", trace.WithAttributes(attribute.Int("tupleCount", len(tuples))))
+	return tuples, nil
 }

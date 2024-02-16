@@ -3,6 +3,7 @@ package ydb
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 
 	"github.com/samber/lo"
@@ -420,5 +421,230 @@ func TestYDBReaderCaveats(t *testing.T) {
 		testListAllCaveats(t, r, expectedNs)
 		testReadCaveatByName(t, r, expectedNs["one"])
 		testLookupCaveatsWithNames(t, r, []string{"one", "two"}, nil)
+	})
+}
+
+// this is a very basic test to ensure yql works at all.
+// full test suit is in github.com/authzed/spicedb/pkg/datastore/test.
+func TestYDBReaderRelationships(t *testing.T) {
+	engine := testserverDatastore.RunYDBForTesting(t, "")
+
+	type testRelationship struct {
+		namespace        string
+		objectID         string
+		relation         string
+		usersetNamespace string
+		usersetObjectID  string
+		usersetRelation  string
+		caveatName       *string
+		caveatContext    *[]byte
+		createdAt        int64
+		deletedAt        *int64
+	}
+
+	testRelationships := []testRelationship{
+		0: {
+			namespace:        "document",
+			objectID:         "firstdoc",
+			relation:         "reader",
+			usersetNamespace: "user",
+			usersetObjectID:  "bob",
+			usersetRelation:  "...",
+			caveatName:       proto.String("test"),
+			caveatContext:    lo.ToPtr([]byte(`{"in":"bar"}`)),
+			createdAt:        10,
+		},
+		1: {
+			namespace:        "document",
+			objectID:         "firstdoc",
+			relation:         "writer",
+			usersetNamespace: "user",
+			usersetObjectID:  "alice",
+			usersetRelation:  "...",
+			createdAt:        10,
+		},
+		2: {
+			namespace:        "document",
+			objectID:         "firstdoc",
+			relation:         "writer",
+			usersetNamespace: "user",
+			usersetObjectID:  "bob",
+			usersetRelation:  "...",
+			createdAt:        1,
+			deletedAt:        proto.Int64(7),
+		},
+	}
+
+	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+		ds, err := NewYDBDatastore(context.Background(), dsn)
+		require.NoError(t, err)
+
+		yDS, err := newYDBDatastore(context.Background(), dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { yDS.Close() })
+
+		err = yDS.driver.Table().Do(context.Background(), func(ctx context.Context, s table.Session) error {
+
+			stmt, err := s.Prepare(
+				ctx,
+				common.AddTablePrefix(`
+					DECLARE $namespace AS Utf8; 
+					DECLARE $objectID AS Utf8; 
+					DECLARE $relation AS Utf8; 
+					DECLARE $usersetNamespace AS Utf8; 
+					DECLARE $usersetObjectID AS Utf8; 
+					DECLARE $usersetRelation AS Utf8; 
+					DECLARE $caveatName AS Optional<Utf8>;
+					DECLARE $caveatContext AS Optional<JsonDocument>;
+					DECLARE $createdAt AS Int64;
+					DECLARE $deletedAt AS Optional<Int64>;
+					INSERT INTO
+						relation_tuple(
+							namespace, 
+							object_id,
+							relation,
+							userset_namespace,
+							userset_object_id,
+							userset_relation,
+							caveat_name,
+							caveat_context,
+							created_at_unix_nano,
+							deleted_at_unix_nano
+						)
+					VALUES 
+						(
+							$namespace,
+							$objectID,
+							$relation,
+							$usersetNamespace,
+							$usersetObjectID,
+							$usersetRelation,
+							$caveatName,
+							$caveatContext,
+							$createdAt,
+							$deletedAt
+						);
+				`, yDS.config.tablePathPrefix),
+			)
+			if err != nil {
+				return err
+			}
+
+			for i := 0; i < len(testRelationships); i++ {
+				_, _, err = stmt.Execute(
+					ctx,
+					table.DefaultTxControl(),
+					table.NewQueryParameters(
+						table.ValueParam("$namespace", types.UTF8Value(testRelationships[i].namespace)),
+						table.ValueParam("$objectID", types.UTF8Value(testRelationships[i].objectID)),
+						table.ValueParam("$relation", types.UTF8Value(testRelationships[i].relation)),
+						table.ValueParam("$usersetNamespace", types.UTF8Value(testRelationships[i].usersetNamespace)),
+						table.ValueParam("$usersetObjectID", types.UTF8Value(testRelationships[i].usersetObjectID)),
+						table.ValueParam("$usersetRelation", types.UTF8Value(testRelationships[i].usersetRelation)),
+						table.ValueParam("$caveatName", types.NullableUTF8Value(testRelationships[i].caveatName)),
+						table.ValueParam("$caveatContext", types.NullableJSONDocumentValueFromBytes(testRelationships[i].caveatContext)),
+						table.ValueParam("$createdAt", types.Int64Value(testRelationships[i].createdAt)),
+						table.ValueParam("$deletedAt", types.NullableInt64Value(testRelationships[i].deletedAt)),
+					),
+				)
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		return ds
+	})
+	t.Cleanup(func() { ds.Close() })
+
+	matchRelationship := func(t *testing.T, expect testRelationship, actual *core.RelationTuple) {
+		require.Equal(t, expect.namespace, actual.GetResourceAndRelation().GetNamespace())
+		require.Equal(t, expect.objectID, actual.GetResourceAndRelation().GetObjectId())
+		require.Equal(t, expect.relation, actual.GetResourceAndRelation().GetRelation())
+		require.Equal(t, expect.usersetNamespace, actual.GetSubject().GetNamespace())
+		require.Equal(t, expect.usersetObjectID, actual.GetSubject().GetObjectId())
+		require.Equal(t, expect.usersetRelation, actual.GetSubject().GetRelation())
+		require.Equal(t, lo.FromPtr(expect.caveatName), actual.GetCaveat().GetCaveatName())
+
+		var actualCaveatContext []byte
+		if actual.GetCaveat().GetContext() != nil {
+			var err error
+			actualCaveatContext, err = json.Marshal(actual.GetCaveat().GetContext().GetFields())
+			require.NoError(t, err)
+		}
+
+		require.Equal(t, lo.FromPtr(expect.caveatContext), actualCaveatContext)
+
+	}
+
+	testQueryRelationships := func(
+		t *testing.T,
+		r datastore.Reader,
+		f datastore.RelationshipsFilter,
+		expect ...testRelationship,
+	) {
+		it, err := r.QueryRelationships(context.Background(), f)
+		require.NoError(t, err)
+		t.Cleanup(it.Close)
+
+		var actual []*core.RelationTuple
+		for v := it.Next(); v != nil; v = it.Next() {
+			actual = append(actual, v)
+		}
+		require.Len(t, actual, len(expect))
+		for i := range expect {
+			matchRelationship(t, expect[i], actual[i])
+		}
+	}
+
+	testReverseQueryRelationships := func(
+		t *testing.T,
+		r datastore.Reader,
+		f datastore.SubjectsFilter,
+		expect ...testRelationship,
+	) {
+		it, err := r.ReverseQueryRelationships(context.Background(), f)
+		require.NoError(t, err)
+		t.Cleanup(it.Close)
+
+		var actual []*core.RelationTuple
+		for v := it.Next(); v != nil; v = it.Next() {
+			actual = append(actual, v)
+		}
+		require.Len(t, actual, len(expect))
+		for i := range expect {
+			matchRelationship(t, expect[i], actual[i])
+		}
+	}
+
+	t.Run("removed relationships not garbage collected", func(t *testing.T) {
+		testRevision := revisions.NewForTimestamp(6)
+		r := ds.SnapshotReader(testRevision)
+		testQueryRelationships(t, r, datastore.RelationshipsFilter{
+			ResourceType:             "document",
+			OptionalResourceRelation: "writer",
+		}, testRelationships[2])
+		testReverseQueryRelationships(t, r, datastore.SubjectsFilter{
+			SubjectType: "user",
+		}, testRelationships[2])
+	})
+
+	t.Run("latest relationships", func(t *testing.T) {
+		testRevision := revisions.NewForTimestamp(10)
+		r := ds.SnapshotReader(testRevision)
+		testQueryRelationships(t, r, datastore.RelationshipsFilter{
+			ResourceType:             "document",
+			OptionalResourceRelation: "reader",
+		}, testRelationships[0])
+		testReverseQueryRelationships(t, r, datastore.SubjectsFilter{
+			SubjectType:        "user",
+			OptionalSubjectIds: []string{"bob"},
+			RelationFilter: datastore.SubjectRelationFilter{
+				IncludeEllipsisRelation: true,
+			},
+		}, testRelationships[0])
 	})
 }
