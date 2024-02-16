@@ -40,7 +40,14 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 	}
 
 	// note: there's no need in select ensure with this removal.
-	if err := rw.deleteCaveatsByNames(ctx, caveatNames); err != nil {
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteCaveatBuilder,
+		rw.newRevision,
+		sq.Eq{colName: caveatNames},
+	); err != nil {
 		return fmt.Errorf("failed to delete existing caveats: %w", err)
 	}
 
@@ -62,7 +69,14 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 // DeleteCaveats deletes the provided caveats by name.
 // This is a table range scan operation.
 func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) error {
-	return rw.deleteCaveatsByNames(ctx, names)
+	return executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteCaveatBuilder,
+		rw.newRevision,
+		sq.Eq{colName: names},
+	)
 }
 
 func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
@@ -80,31 +94,33 @@ func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, newConfigs ...*cor
 	panic("implement me")
 }
 
-func (rw *ydbReadWriter) DeleteNamespaces(ctx context.Context, nsNames ...string) error {
-	// TODO implement me
-	panic("implement me")
+// DeleteNamespaces deletes namespaces including associated relationships.
+func (rw *ydbReadWriter) DeleteNamespaces(ctx context.Context, names ...string) error {
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteNamespaceBuilder,
+		rw.newRevision,
+		sq.Eq{colNamespace: names},
+	); err != nil {
+		return fmt.Errorf("failed to delete namespaces: %w", err)
+	}
+
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteRelationBuilder,
+		rw.newRevision,
+		sq.Eq{colNamespace: names},
+	); err != nil {
+		return fmt.Errorf("failed to delete namespace relations: %w", err)
+	}
+	return nil
 }
 
 func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteRelationshipSource) (uint64, error) {
 	// TODO implement me
 	panic("implement me")
-}
-
-func (rw *ydbReadWriter) deleteCaveatsByNames(ctx context.Context, names []string) error {
-	sql, args, err := deleteCaveatBuilder.
-		Set(colDeletedAtUnixNano, rw.newRevision.TimestampNanoSec()).
-		Where(sq.Eq{colName: names}).
-		ToYdbSql()
-	if err != nil {
-		return fmt.Errorf("failed to build delete caveats query: %w", err)
-	}
-
-	sql = ydbCommon.AddTablePrefix(sql, rw.tablePathPrefix)
-	res, err := rw.executor.Execute(ctx, sql, table.NewQueryParameters(args...))
-	if err != nil {
-		return fmt.Errorf("failed to delete caveats: %w", err)
-	}
-	defer res.Close()
-
-	return nil
 }

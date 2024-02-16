@@ -69,8 +69,10 @@ var (
 	deleteCaveatBuilder = sq.Update(tableCaveat).Where(livingObjectPredicate)
 	insertCaveatBuilder = sq.Insert(tableCaveat).Columns(colName, colDefinition, colCreatedAtUnixNano)
 
-	readNamespaceBuilder = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
-	readRelationBuilder  = sq.Select(
+	readNamespaceBuilder   = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
+	deleteNamespaceBuilder = sq.Update(tableNamespaceConfig).Where(livingObjectModifier)
+
+	readRelationBuilder = sq.Select(
 		colNamespace,
 		colObjectID,
 		colRelation,
@@ -80,6 +82,7 @@ var (
 		colCaveatName,
 		colCaveatContext,
 	).From(tableRelationTuple)
+	deleteRelationBuilder = sq.Update(tableRelationTuple).Where(livingObjectModifier)
 )
 
 type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
@@ -248,4 +251,27 @@ func queryTuples(
 
 	span.AddEvent("Tuples loaded", trace.WithAttributes(attribute.Int("tupleCount", len(tuples))))
 	return tuples, nil
+}
+
+func executeDeleteQuery(
+	ctx context.Context,
+	tablePathPrefix string,
+	executor queryExecutor,
+	b sq.UpdateBuilder,
+	deleteRev revisions.TimestampRevision,
+	pred sq.Sqlizer,
+) error {
+	sql, args, err := b.Set(colDeletedAtUnixNano, deleteRev.TimestampNanoSec()).Where(pred).ToYdbSql()
+	if err != nil {
+		return fmt.Errorf("failed to build query: %w", err)
+	}
+
+	sql = ydbCommon.AddTablePrefix(sql, tablePathPrefix)
+	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
+	if err != nil {
+		return fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer res.Close()
+
+	return nil
 }
