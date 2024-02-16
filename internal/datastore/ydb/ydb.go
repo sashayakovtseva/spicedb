@@ -8,14 +8,14 @@ import (
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
-	"github.com/ydb-platform/ydb-go-sdk/v3/table"
-	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
+	"go.opentelemetry.io/otel"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
 	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
+	"github.com/authzed/spicedb/internal/datastore/ydb/migrations"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
@@ -29,6 +29,10 @@ func init() {
 var (
 	_ datastore.Datastore              = &ydbDatastore{}
 	_ datastoreCommon.GarbageCollector = &ydbDatastore{}
+
+	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
+
+	tracer = otel.Tracer("spicedb/internal/datastore/ydb")
 )
 
 const Engine = "ydb"
@@ -43,15 +47,22 @@ func NewYDBDatastore(ctx context.Context, dsn string, opts ...Option) (datastore
 }
 
 type ydbDatastore struct {
+	*revisions.RemoteClockRevisions
+	revisions.CommonDecoder
+
 	driver *ydb.Driver
-	config ydbConfig
+	config *ydbConfig
+
+	originalDSN string
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
 	parsedDSN := common.ParseDSN(dsn)
 
 	config := generateConfig(opts)
-	config.tablePathPrefix = parsedDSN.TablePathPrefix
+	if parsedDSN.TablePathPrefix != "" {
+		config.tablePathPrefix = parsedDSN.TablePathPrefix
+	}
 
 	db, err := ydb.Open(
 		ctx,
@@ -63,59 +74,25 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		return nil, fmt.Errorf("failed to open YDB connectionn: %w", err)
 	}
 
-	return &ydbDatastore{
-		driver: db,
-		config: config,
-	}, nil
-}
+	maxRevisionStaleness := time.Duration(float64(config.revisionQuantization.Nanoseconds())*
+		config.maxRevisionStalenessPercent) * time.Nanosecond
 
-func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {
-	// TODO implement me
-	panic("implement me")
-}
+	ds := &ydbDatastore{
+		RemoteClockRevisions: revisions.NewRemoteClockRevisions(
+			config.gcWindow,
+			maxRevisionStaleness,
+			config.followerReadDelay,
+			config.revisionQuantization,
+		),
+		CommonDecoder: revisions.CommonDecoder{Kind: revisions.Timestamp},
 
-func (y *ydbDatastore) ReadWriteTx(
-	ctx context.Context,
-	fn datastore.TxUserFunc,
-	opts ...options.RWTOptionsOption,
-) (datastore.Revision, error) {
+		driver:      db,
+		originalDSN: dsn,
+		config:      config,
+	}
+	ds.SetNowFunc(ds.HeadRevision)
 
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) OptimizedRevision(ctx context.Context) (datastore.Revision, error) {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
-	now := truetime.UnixNano()
-	return revisions.NewForTimestamp(now), nil
-}
-
-func (y *ydbDatastore) CheckRevision(ctx context.Context, revision datastore.Revision) error {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) RevisionFromString(serialized string) (datastore.Revision, error) {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, error) {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
-	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
+	return ds, nil
 }
 
 func (y *ydbDatastore) Close() error {
@@ -129,35 +106,68 @@ func (y *ydbDatastore) Close() error {
 	return nil
 }
 
-func queryRowTx(
-	ctx context.Context,
-	tx table.TransactionActor,
-	query string,
-	queryParams *table.QueryParameters,
-	values ...indexed.RequiredOrOptional,
-) error {
-	res, err := tx.Execute(
-		ctx,
-		query,
-		queryParams,
-	)
+func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, error) {
+	headMigration, err := migrations.YDBMigrations.HeadRevision()
 	if err != nil {
-		return err
-	}
-	defer res.Close()
-
-	if err := res.NextResultSetErr(ctx); err != nil {
-		return err
-	}
-	if !res.NextRow() {
-		return fmt.Errorf("no unique id rows")
-	}
-	if err := res.Scan(values...); err != nil {
-		return err
-	}
-	if err := res.Err(); err != nil {
-		return err
+		return datastore.ReadyState{}, fmt.Errorf("invalid head migration found for YDB: %w", err)
 	}
 
-	return nil
+	ydbDriver, err := migrations.NewYDBDriver(ctx, y.originalDSN)
+	if err != nil {
+		return datastore.ReadyState{}, err
+	}
+	defer ydbDriver.Close(ctx)
+
+	version, err := ydbDriver.Version(ctx)
+	if err != nil {
+		return datastore.ReadyState{}, err
+	}
+
+	if version != headMigration {
+		return datastore.ReadyState{
+			Message: fmt.Sprintf(
+				"YDB is not migrated: currently at revision `%s`, but requires `%s`. Please run `spicedb migrate`.",
+				version,
+				headMigration,
+			),
+		}, nil
+	}
+
+	return datastore.ReadyState{IsReady: true}, nil
+}
+
+func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
+	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
+}
+
+func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {
+	rev := revision.(revisions.TimestampRevision)
+
+	return &ydbReader{
+		tablePathPrefix: y.config.tablePathPrefix,
+		executor: sessionQueryExecutor{
+			driver: y.driver,
+		},
+		modifier: revisionedQueryModifier(rev),
+	}
+}
+
+func (y *ydbDatastore) ReadWriteTx(
+	ctx context.Context,
+	fn datastore.TxUserFunc,
+	opts ...options.RWTOptionsOption,
+) (datastore.Revision, error) {
+
+	// TODO implement me
+	panic("implement me")
+}
+
+func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
+	now := truetime.UnixNano()
+	return revisions.NewForTimestamp(now), nil
+}
+
+func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
+	// TODO implement me
+	panic("implement me")
 }
