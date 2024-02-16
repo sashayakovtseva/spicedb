@@ -14,15 +14,12 @@ import (
 
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
-	testserverDatastore "github.com/authzed/spicedb/internal/testserver/datastore"
 	"github.com/authzed/spicedb/pkg/datastore"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
 func TestYDBReaderNamespaces(t *testing.T) {
-	engine := testserverDatastore.RunYDBForTesting(t, "")
-
-	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+	ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
 		ds, err := NewYDBDatastore(context.Background(), dsn)
 		require.NoError(t, err)
 
@@ -226,9 +223,7 @@ func TestYDBReaderNamespaces(t *testing.T) {
 }
 
 func TestYDBReaderCaveats(t *testing.T) {
-	engine := testserverDatastore.RunYDBForTesting(t, "")
-
-	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+	ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
 		ds, err := NewYDBDatastore(context.Background(), dsn)
 		require.NoError(t, err)
 
@@ -427,8 +422,6 @@ func TestYDBReaderCaveats(t *testing.T) {
 // this is a very basic test to ensure yql works at all.
 // full test suit is in github.com/authzed/spicedb/pkg/datastore/test.
 func TestYDBReaderRelationships(t *testing.T) {
-	engine := testserverDatastore.RunYDBForTesting(t, "")
-
 	type testRelationship struct {
 		namespace        string
 		objectID         string
@@ -475,7 +468,7 @@ func TestYDBReaderRelationships(t *testing.T) {
 		},
 	}
 
-	ds := engine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+	ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
 		ds, err := NewYDBDatastore(context.Background(), dsn)
 		require.NoError(t, err)
 

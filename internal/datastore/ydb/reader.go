@@ -22,9 +22,16 @@ type ydbReader struct {
 	// commonQueryExecutor is used in QueryRelationships.
 	// Basically it is a wrapper around queryExecutor in order to reuse common codebase.
 	commonQueryExecutor common.QueryExecutor
+	// isSnapshotRead is used to select optimal secondary indexes for queries.
+	isSnapshotRead bool
 }
 
-func newYDBReader(tablePathPrefix string, executor queryExecutor, modifier queryModifier) *ydbReader {
+func newYDBReader(
+	tablePathPrefix string,
+	executor queryExecutor,
+	modifier queryModifier,
+	isSnapshotRead bool,
+) *ydbReader {
 	return &ydbReader{
 		tablePathPrefix: tablePathPrefix,
 		executor:        executor,
@@ -33,9 +40,14 @@ func newYDBReader(tablePathPrefix string, executor queryExecutor, modifier query
 			Executor: newYDBCommonQueryExecutor(tablePathPrefix, executor),
 			ToSQL:    toYQLWrapper,
 		},
+		isSnapshotRead: isSnapshotRead,
 	}
 }
 
+// ReadCaveatByName returns a caveat with the provided name.
+// It returns an instance of ErrCaveatNotFound if not found.
+// For snapshot reads this is a table range scan operation.
+// For latest data reads this is an index's table range scan operation.
 func (r *ydbReader) ReadCaveatByName(
 	ctx context.Context,
 	name string,
@@ -47,8 +59,18 @@ func (r *ydbReader) ReadCaveatByName(
 	return loaded, version, nil
 }
 
+// ListAllCaveats returns all caveats stored in the system.
+// For snapshot reads this is  an index's table range scan operation.
+// For latest data reads this is an index's table range scan operation.
 func (r *ydbReader) ListAllCaveats(ctx context.Context) ([]datastore.RevisionedCaveat, error) {
-	caveatsWithRevisions, err := loadAllCaveats(ctx, r.tablePathPrefix, r.executor, r.modifier)
+	caveatsWithRevisions, err := loadAllCaveats(
+		ctx,
+		r.tablePathPrefix,
+		r.executor,
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
+			return r.modifier(builder).View(ixUqCaveatLiving)
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list caveats: %w", err)
 	}
@@ -56,6 +78,9 @@ func (r *ydbReader) ListAllCaveats(ctx context.Context) ([]datastore.RevisionedC
 	return caveatsWithRevisions, err
 }
 
+// LookupCaveatsWithNames finds all caveats with the matching names.
+// For snapshot reads this is a table range scan operation.
+// For latest data reads this is an index's table range scan operation.
 func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) ([]datastore.RevisionedCaveat, error) {
 	if len(names) == 0 {
 		return nil, nil
@@ -71,7 +96,11 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 		r.tablePathPrefix,
 		r.executor,
 		func(builder sq.SelectBuilder) sq.SelectBuilder {
-			return r.modifier(builder).Where(clause)
+			builder = r.modifier(builder).Where(clause)
+			if !r.isSnapshotRead {
+				builder = builder.View(ixUqCaveatLiving)
+			}
+			return builder
 		},
 	)
 	if err != nil {
@@ -256,7 +285,11 @@ func (r *ydbReader) loadCaveat(
 		r.tablePathPrefix,
 		r.executor,
 		func(builder sq.SelectBuilder) sq.SelectBuilder {
-			return r.modifier(builder).Where(sq.Eq{colName: name})
+			builder = r.modifier(builder).Where(sq.Eq{colName: name})
+			if !r.isSnapshotRead {
+				builder = builder.View(ixUqCaveatLiving)
+			}
+			return builder
 		},
 	)
 	if err != nil {
