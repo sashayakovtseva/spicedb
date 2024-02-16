@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	yq "github.com/flymedllva/ydb-go-qb/yqb"
+	sq "github.com/Masterminds/squirrel"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
+	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
-	"github.com/authzed/spicedb/internal/datastore/ydb/common"
+	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
@@ -18,6 +19,21 @@ type ydbReader struct {
 	tablePathPrefix string
 	executor        queryExecutor
 	modifier        queryModifier
+	// commonQueryExecutor is used in QueryRelationships.
+	// Basically it is a wrapper around queryExecutor in order to reuse common codebase.
+	commonQueryExecutor common.QueryExecutor
+}
+
+func newYDBReader(tablePathPrefix string, executor queryExecutor, modifier queryModifier) *ydbReader {
+	return &ydbReader{
+		tablePathPrefix: tablePathPrefix,
+		executor:        executor,
+		modifier:        modifier,
+		commonQueryExecutor: common.QueryExecutor{
+			Executor: newYDBCommonQueryExecutor(tablePathPrefix, executor),
+			ToSQL:    toYQLWrapper,
+		},
+	}
 }
 
 func (r *ydbReader) ReadCaveatByName(
@@ -45,16 +61,16 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 		return nil, nil
 	}
 
-	var clause yq.Or
+	var clause sq.Or
 	for _, nsName := range names {
-		clause = append(clause, yq.Eq{coltName: nsName})
+		clause = append(clause, sq.Eq{colName: nsName})
 	}
 
 	caveatsWithRevisions, err := loadAllCaveats(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
 			return r.modifier(builder).Where(clause)
 		},
 	)
@@ -65,14 +81,49 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 	return caveatsWithRevisions, err
 }
 
-func (r *ydbReader) QueryRelationships(ctx context.Context, filter datastore.RelationshipsFilter, options ...options.QueryOptionsOption) (datastore.RelationshipIterator, error) {
-	// TODO implement me
-	panic("implement me")
+func (r *ydbReader) QueryRelationships(
+	ctx context.Context,
+	filter datastore.RelationshipsFilter,
+	opts ...options.QueryOptionsOption,
+) (datastore.RelationshipIterator, error) {
+	qBuilder, err := common.NewSchemaQueryFilterer(
+		relationTupleSchema,
+		r.modifier(readRelationBuilder),
+	).FilterWithRelationshipsFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.commonQueryExecutor.ExecuteQuery(ctx, qBuilder, opts...)
 }
 
-func (r *ydbReader) ReverseQueryRelationships(ctx context.Context, subjectsFilter datastore.SubjectsFilter, options ...options.ReverseQueryOptionsOption) (datastore.RelationshipIterator, error) {
-	// TODO implement me
-	panic("implement me")
+func (r *ydbReader) ReverseQueryRelationships(
+	ctx context.Context,
+	subjectsFilter datastore.SubjectsFilter,
+	opts ...options.ReverseQueryOptionsOption,
+) (datastore.RelationshipIterator, error) {
+	qBuilder, err := common.NewSchemaQueryFilterer(
+		relationTupleSchema,
+		r.modifier(readRelationBuilder),
+	).FilterWithSubjectsSelectors(subjectsFilter.AsSelector())
+	if err != nil {
+		return nil, err
+	}
+
+	queryOpts := options.NewReverseQueryOptionsWithOptions(opts...)
+
+	if queryOpts.ResRelation != nil {
+		qBuilder = qBuilder.
+			FilterToResourceType(queryOpts.ResRelation.Namespace).
+			FilterToRelation(queryOpts.ResRelation.Relation)
+	}
+
+	return r.commonQueryExecutor.ExecuteQuery(ctx,
+		qBuilder,
+		options.WithLimit(queryOpts.LimitForReverse),
+		options.WithAfter(queryOpts.AfterForReverse),
+		options.WithSort(queryOpts.SortForReverse),
+	)
 }
 
 func (r *ydbReader) ReadNamespaceByName(
@@ -103,16 +154,16 @@ func (r *ydbReader) LookupNamespacesWithNames(
 		return nil, nil
 	}
 
-	var clause yq.Or
+	var clause sq.Or
 	for _, nsName := range nsNames {
-		clause = append(clause, yq.Eq{colNamespace: nsName})
+		clause = append(clause, sq.Eq{colNamespace: nsName})
 	}
 
 	nsDefsWithRevisions, err := loadAllNamespaces(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
 			return r.modifier(builder).Where(clause)
 		},
 	)
@@ -122,8 +173,6 @@ func (r *ydbReader) LookupNamespacesWithNames(
 
 	return nsDefsWithRevisions, err
 }
-
-var readNamespaceBuilder = yq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
 
 func (r *ydbReader) loadNamespace(
 	ctx context.Context,
@@ -136,8 +185,8 @@ func (r *ydbReader) loadNamespace(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
-			return r.modifier(builder).Where(yq.Eq{colNamespace: namespace})
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
+			return r.modifier(builder).Where(sq.Eq{colNamespace: namespace})
 		},
 	)
 	if err != nil {
@@ -162,7 +211,7 @@ func loadAllNamespaces(
 		return nil, err
 	}
 
-	sql = common.AddTablePrefix(sql, tablePathPrefix)
+	sql = ydbCommon.AddTablePrefix(sql, tablePathPrefix)
 	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
 	if err != nil {
 		return nil, err
@@ -195,8 +244,6 @@ func loadAllNamespaces(
 	return nsDefs, nil
 }
 
-var readCaveatBuilder = yq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
-
 func (r *ydbReader) loadCaveat(
 	ctx context.Context,
 	name string,
@@ -208,8 +255,8 @@ func (r *ydbReader) loadCaveat(
 		ctx,
 		r.tablePathPrefix,
 		r.executor,
-		func(builder yq.SelectBuilder) yq.SelectBuilder {
-			return r.modifier(builder).Where(yq.Eq{coltName: name})
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
+			return r.modifier(builder).Where(sq.Eq{colName: name})
 		},
 	)
 	if err != nil {
@@ -234,7 +281,7 @@ func loadAllCaveats(
 		return nil, err
 	}
 
-	sql = common.AddTablePrefix(sql, tablePathPrefix)
+	sql = ydbCommon.AddTablePrefix(sql, tablePathPrefix)
 	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
 	if err != nil {
 		return nil, err
