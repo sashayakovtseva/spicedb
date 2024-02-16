@@ -89,9 +89,50 @@ func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.Rel
 	panic("implement me")
 }
 
-func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, newConfigs ...*core.NamespaceDefinition) error {
-	// TODO implement me
-	panic("implement me")
+// WriteNamespaces takes proto namespace definitions and persists them.
+func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, namespaces ...*core.NamespaceDefinition) error {
+	if len(namespaces) == 0 {
+		return nil
+	}
+
+	b := insertNamespaceBuilder
+	namespaceNames := make([]string, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		definitionBytes, err := namespace.MarshalVT()
+		if err != nil {
+			return fmt.Errorf("failed to marshal namespace definition: %w", err)
+		}
+
+		valuesToWrite := []any{namespace.Name, definitionBytes, rw.newRevision.TimestampNanoSec()}
+		b = b.Values(valuesToWrite...)
+		namespaceNames = append(namespaceNames, namespace.Name)
+	}
+
+	// note: there's no need in select ensure with this removal.
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteNamespaceBuilder,
+		rw.newRevision,
+		sq.Eq{colNamespace: namespaceNames},
+	); err != nil {
+		return fmt.Errorf("failed to delete existing namespaces: %w", err)
+	}
+
+	sql, args, err := b.ToYdbSql()
+	if err != nil {
+		return fmt.Errorf("failed to build insert namespaces query: %w", err)
+	}
+
+	sql = ydbCommon.AddTablePrefix(sql, rw.tablePathPrefix)
+	res, err := rw.executor.Execute(ctx, sql, table.NewQueryParameters(args...))
+	if err != nil {
+		return fmt.Errorf("failed to insert namespaces: %w", err)
+	}
+	defer res.Close()
+
+	return nil
 }
 
 // DeleteNamespaces deletes namespaces including associated relationships.

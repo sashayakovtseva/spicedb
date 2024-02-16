@@ -36,7 +36,7 @@ CREATE TABLE metadata (
 	PRIMARY KEY (unique_id)
 );`
 
-	// todo check namespace name with Ensure in insert.
+	// todo check namespace name with Ensure in insert and check index usages.
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	// ideally PK should be (namespace, deleted_at_unix_nano), but since deleted_at_unix_nano is
 	// updated during delete operation it cannot be used. simply (namespace) is also not applicable

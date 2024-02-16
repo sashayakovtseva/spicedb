@@ -71,6 +71,8 @@ var (
 
 	readNamespaceBuilder   = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
 	deleteNamespaceBuilder = sq.Update(tableNamespaceConfig).Where(livingObjectModifier)
+	insertNamespaceBuilder = sq.Insert(tableNamespaceConfig).
+				Columns(colNamespace, colSerializedConfig, colCreatedAtUnixNano)
 
 	readRelationBuilder = sq.Select(
 		colNamespace,
