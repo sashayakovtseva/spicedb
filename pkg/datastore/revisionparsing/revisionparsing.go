@@ -7,6 +7,7 @@ import (
 	"github.com/authzed/spicedb/internal/datastore/postgres"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/spanner"
+	"github.com/authzed/spicedb/internal/datastore/ydb"
 	"github.com/authzed/spicedb/pkg/datastore"
 )
 
@@ -21,6 +22,7 @@ var ParseRevisionStringByDatastoreEngineID = map[string]ParsingFunc{
 	postgres.Engine: ParsingFunc(postgres.ParseRevisionString),
 	mysql.Engine:    ParsingFunc(mysql.ParseRevisionString),
 	spanner.Engine:  ParsingFunc(spanner.ParseRevisionString),
+	ydb.Engine:      ParsingFunc(ydb.ParseRevisionString),
 }
 
 // MustParseRevisionForTest is a convenience ParsingFunc that can be used in tests and panics when parsing an error.

@@ -25,15 +25,6 @@ FROM
 WHERE 
 	Path = $table_path_prefix || '/relation_tuple';
 `
-		queryLiveNamespaces = `
-SELECT 
-    serialized_config,
-    created_at_unix_nano 
-FROM 
-    namespace_config
-WHERE 
-    deleted_at_unix_nano IS NULL
-`
 	)
 
 	var (
@@ -45,7 +36,7 @@ WHERE
 	err := y.driver.Table().DoTx(
 		ctx,
 		func(ctx context.Context, tx table.TransactionActor) error {
-			err := queryRowTx(
+			err := queryRow(
 				ctx,
 				tx,
 				common.AddTablePrefix(queryUniqueID, y.config.tablePathPrefix),
@@ -56,7 +47,7 @@ WHERE
 				return err
 			}
 
-			err = queryRowTx(
+			err = queryRow(
 				ctx,
 				tx,
 				queryEstimatedRelationshipCount, // no need to rewrite this query
@@ -71,8 +62,9 @@ WHERE
 
 			nsDefs, err = loadAllNamespaces(
 				ctx,
+				y.config.tablePathPrefix,
 				tx,
-				common.AddTablePrefix(queryLiveNamespaces, y.config.tablePathPrefix),
+				livingObjectModifier,
 			)
 			if err != nil {
 				return err
