@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
-	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/internal/datastore/ydb/migrations"
@@ -28,8 +27,7 @@ func init() {
 }
 
 var (
-	_ datastore.Datastore              = &ydbDatastore{}
-	_ datastoreCommon.GarbageCollector = &ydbDatastore{}
+	_ datastore.Datastore = &ydbDatastore{}
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 

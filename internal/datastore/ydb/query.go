@@ -30,6 +30,7 @@ const (
 	// namespace_config
 	tableNamespaceConfig = "namespace_config"
 	colSerializedConfig  = "serialized_config"
+	ixUqNamespaceLiving  = "uq_namespace_living"
 
 	// caveat
 	tableCaveat      = "caveat"
