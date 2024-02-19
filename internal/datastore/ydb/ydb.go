@@ -176,7 +176,6 @@ func (y *ydbDatastore) ReadWriteTx(
 		txOptions = append(txOptions, table.WithIdempotent())
 	}
 
-	// todo use maxRetries somehow.
 	var newRev revisions.TimestampRevision
 	err := y.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
 		// this is actually a BAD way to do mvcc which may lead to new enemy problem.
