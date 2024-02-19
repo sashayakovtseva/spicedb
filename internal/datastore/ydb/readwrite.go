@@ -6,6 +6,7 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	v1 "github.com/authzed/authzed-go/proto/authzed/api/v1"
+	"github.com/jzelinskie/stringz"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 
 	"github.com/authzed/spicedb/internal/datastore/revisions"
@@ -52,9 +53,41 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 	panic("implement me")
 }
 
+// DeleteRelationships deletes all Relationships that match the provided filter.
 func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.RelationshipFilter) error {
-	// TODO implement me
-	panic("implement me")
+	pred := sq.Eq{
+		colNamespace: filter.GetResourceType(),
+	}
+
+	if filter.GetOptionalResourceId() != "" {
+		pred[colObjectID] = filter.GetOptionalResourceId()
+	}
+	if filter.GetOptionalRelation() != "" {
+		pred[colRelation] = filter.GetOptionalRelation()
+	}
+
+	if subjectFilter := filter.GetOptionalSubjectFilter(); subjectFilter != nil {
+		pred[colUsersetNamespace] = subjectFilter.GetSubjectType()
+		if subjectFilter.GetOptionalSubjectId() != "" {
+			pred[colUsersetObjectID] = subjectFilter.GetOptionalSubjectId()
+		}
+		if relationFilter := subjectFilter.GetOptionalRelation(); relationFilter != nil {
+			pred[colUsersetRelation] = stringz.DefaultEmpty(relationFilter.GetRelation(), datastore.Ellipsis)
+		}
+	}
+
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteRelationBuilder,
+		rw.newRevision,
+		pred,
+	); err != nil {
+		return fmt.Errorf("failed to delete relations: %w", err)
+	}
+
+	return nil
 }
 
 // WriteNamespaces takes proto namespace definitions and persists them.
