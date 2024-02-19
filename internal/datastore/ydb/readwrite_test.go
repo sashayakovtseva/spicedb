@@ -115,3 +115,99 @@ func TestYDBReadWriterCaveats(t *testing.T) {
 		require.Empty(t, actual)
 	})
 }
+
+func TestYDBReadWriterNamespaces(t *testing.T) {
+	ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+		ds, err := NewYDBDatastore(context.Background(), dsn)
+		require.NoError(t, err)
+		return ds
+	})
+	t.Cleanup(func() { ds.Close() })
+
+	testNamespaces := []*core.NamespaceDefinition{
+		0: ns.Namespace(
+			"one",
+			ns.MustRelation("somerel", nil),
+		),
+		1: ns.Namespace(
+			"two",
+		),
+		2: ns.Namespace(
+			"one",
+			ns.MustRelation("updatedrel", nil),
+		),
+		3: ns.Namespace(
+			"three",
+		),
+	}
+
+	var initialRev datastore.Revision
+	t.Run("initial write", func(t *testing.T) {
+		var err error
+		initialRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteNamespaces(ctx, testNamespaces[:2]...)
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, initialRev)
+
+	t.Run("read written namespaces", func(t *testing.T) {
+		r := ds.SnapshotReader(initialRev)
+		actual, err := r.ListAllNamespaces(context.Background())
+		require.NoError(t, err)
+		require.Len(t, actual, 2)
+		require.Equal(t, actual[0].LastWrittenRevision, initialRev)
+		require.Equal(t, actual[1].LastWrittenRevision, initialRev)
+		require.True(t, proto.Equal(actual[0].Definition, testNamespaces[0]))
+		require.True(t, proto.Equal(actual[1].Definition, testNamespaces[1]))
+	})
+
+	var rewriteRev datastore.Revision
+	t.Run("partial rewrite", func(t *testing.T) {
+		var err error
+		rewriteRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteNamespaces(ctx, testNamespaces[2:4]...)
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, rewriteRev)
+
+	t.Run("read updated namespaces", func(t *testing.T) {
+		r := ds.SnapshotReader(rewriteRev)
+		actual, err := r.ListAllNamespaces(context.Background())
+		require.NoError(t, err)
+		require.Len(t, actual, 3)
+		require.Equal(t, actual[0].LastWrittenRevision, rewriteRev)
+		require.Equal(t, actual[1].LastWrittenRevision, rewriteRev)
+		require.Equal(t, actual[2].LastWrittenRevision, initialRev)
+		require.True(t, proto.Equal(actual[0].Definition, testNamespaces[2]))
+		require.True(t, proto.Equal(actual[1].Definition, testNamespaces[3]))
+		require.True(t, proto.Equal(actual[2].Definition, testNamespaces[1]))
+	})
+
+	var deleteRev datastore.Revision
+	t.Run("delete namespaces", func(t *testing.T) {
+		var err error
+		deleteRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.DeleteNamespaces(ctx, "one", "two", "three")
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, deleteRev)
+
+	t.Run("read empty namespaces", func(t *testing.T) {
+		r := ds.SnapshotReader(deleteRev)
+		actual, err := r.ListAllNamespaces(context.Background())
+		require.NoError(t, err)
+		require.Empty(t, actual)
+	})
+}

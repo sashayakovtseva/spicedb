@@ -71,7 +71,7 @@ var (
 	insertCaveatBuilder = sq.Insert(tableCaveat).Columns(colName, colDefinition, colCreatedAtUnixNano)
 
 	readNamespaceBuilder   = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
-	deleteNamespaceBuilder = sq.Update(tableNamespaceConfig).Where(livingObjectModifier)
+	deleteNamespaceBuilder = sq.Update(tableNamespaceConfig).Where(livingObjectPredicate)
 	insertNamespaceBuilder = sq.Insert(tableNamespaceConfig).
 				Columns(colNamespace, colSerializedConfig, colCreatedAtUnixNano)
 
@@ -85,7 +85,7 @@ var (
 		colCaveatName,
 		colCaveatContext,
 	).From(tableRelationTuple)
-	deleteRelationBuilder = sq.Update(tableRelationTuple).Where(livingObjectModifier)
+	deleteRelationBuilder = sq.Update(tableRelationTuple).Where(livingObjectPredicate)
 )
 
 type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
