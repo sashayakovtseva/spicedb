@@ -17,6 +17,7 @@ import (
 	"github.com/authzed/spicedb/pkg/datastore"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 	"github.com/authzed/spicedb/pkg/spiceerrors"
+	"github.com/authzed/spicedb/pkg/tuple"
 )
 
 type ydbReadWriter struct {
@@ -52,17 +53,17 @@ func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) erro
 	)
 }
 
+// WriteRelationships takes a list of tuple mutations and applies them to the datastore.
 func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
-	// touchMutationsByNonCaveat := make(map[string]*core.RelationTupleUpdate, len(mutations))
-
 	insertBuilder := insertRelationsBuilder
 	deleteBuilder := deleteRelationBuilder
 
-	// touchInserts := insertRelationsBuilder
-
 	var (
+		err             error
 		insertionTuples []*core.RelationTuple
-		deleteClauses   sq.Or
+		touchTuples     []*core.RelationTuple
+
+		deleteClauses sq.Or
 	)
 
 	// Parse the updates, building inserts for CREATE/TOUCH and deletes for DELETE.
@@ -71,12 +72,14 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 
 		switch mut.GetOperation() {
 		case core.RelationTupleUpdate_CREATE:
-			insertBuilder = appendForInsertion(insertBuilder, tpl, rw.newRevision)
 			insertionTuples = append(insertionTuples, tpl)
+			insertBuilder, err = appendForInsertion(insertBuilder, tpl, rw.newRevision)
+			if err != nil {
+				return fmt.Errorf("failed to append tuple for insertion: %w", err)
+			}
 
-		// case core.RelationTupleUpdate_TOUCH:
-		// 	touchMutationsByNonCaveat[tuple.StringWithoutCaveat(tpl)] = mut
-		// 	touchInserts = appendForInsertion(touchInserts, tpl, rw.newRevision)
+		case core.RelationTupleUpdate_TOUCH:
+			touchTuples = append(touchTuples, tpl)
 
 		case core.RelationTupleUpdate_DELETE:
 			deleteClauses = append(deleteClauses, exactRelationshipClause(tpl))
@@ -90,17 +93,47 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 	if len(insertionTuples) > 0 {
 		dups, err := rw.selectTuples(ctx, insertionTuples)
 		if err != nil {
-			return fmt.Errorf("failed to ensure tuples uniqueness: %w", err)
+			return fmt.Errorf("failed to ensure CREATE tuples uniqueness: %w", err)
 		}
 		if len(dups) > 0 {
 			return datastoreCommon.NewCreateRelationshipExistsError(dups[0])
 		}
 	}
+	if len(touchTuples) > 0 {
+		dups, err := rw.selectTuples(ctx, touchTuples)
+		if err != nil {
+			return fmt.Errorf("failed to ensure TOUCH tuples uniqueness: %w", err)
+		}
 
-	// Run CREATE insertions, if any.
-	if len(insertionTuples) > 0 {
-		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
-			return fmt.Errorf("failed to insert tuples: %w", err)
+		duplicatePKToRel := make(map[string]*core.RelationTuple, len(dups))
+		for i := range dups {
+			duplicatePKToRel[tuple.StringWithoutCaveat(dups[i])] = dups[i]
+		}
+
+		for i := 0; i < len(touchTuples); {
+			pk := tuple.StringWithoutCaveat(touchTuples[i])
+			dup, ok := duplicatePKToRel[pk]
+			if !ok {
+				insertBuilder, err = appendForInsertion(insertBuilder, touchTuples[i], rw.newRevision)
+				if err != nil {
+					return fmt.Errorf("failed to append tuple for insertion: %w", err)
+				}
+				i++
+				continue
+			}
+
+			if tuple.Equal(touchTuples[i], dup) {
+				touchTuples[i], touchTuples[len(touchTuples)-1] = touchTuples[len(touchTuples)-1], touchTuples[i]
+				touchTuples = touchTuples[:len(touchTuples)-1]
+				continue
+			}
+
+			deleteClauses = append(deleteClauses, exactRelationshipClause(dup))
+			insertBuilder, err = appendForInsertion(insertBuilder, touchTuples[i], rw.newRevision)
+			if err != nil {
+				return fmt.Errorf("failed to append tuple for insertion: %w", err)
+			}
+			i++
 		}
 	}
 
@@ -118,150 +151,12 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 		}
 	}
 
-	// // For each of the TOUCH operations, invoke the INSERTs, but with `ON CONFLICT DO NOTHING` to ensure
-	// // that the operations over existing relationships no-op.
-	// if len(touchMutationsByNonCaveat) > 0 {
-	// 	touchInserts = touchInserts.Suffix(fmt.Sprintf("ON CONFLICT DO NOTHING RETURNING %s, %s, %s, %s, %s, %s",
-	// 		colNamespace,
-	// 		colObjectID,
-	// 		colRelation,
-	// 		colUsersetNamespace,
-	// 		colUsersetObjectID,
-	// 		colUsersetRelation,
-	// 	))
-	//
-	// 	sql, args, err := touchInserts.ToSql()
-	// 	if err != nil {
-	// 		return fmt.Errorf(errUnableToWriteRelationships, err)
-	// 	}
-	//
-	// 	rows, err := rwt.tx.Query(ctx, sql, args...)
-	// 	if err != nil {
-	// 		return fmt.Errorf(errUnableToWriteRelationships, err)
-	// 	}
-	// 	defer rows.Close()
-	//
-	// 	// Remove from the TOUCH map of operations each row that was successfully inserted.
-	// 	// This will cover any TOUCH that created an entirely new relationship, acting like
-	// 	// a CREATE.
-	// 	tpl := &core.RelationTuple{
-	// 		ResourceAndRelation: &core.ObjectAndRelation{},
-	// 		Subject:             &core.ObjectAndRelation{},
-	// 	}
-	//
-	// 	for rows.Next() {
-	// 		err := rows.Scan(
-	// 			&tpl.ResourceAndRelation.Namespace,
-	// 			&tpl.ResourceAndRelation.ObjectId,
-	// 			&tpl.ResourceAndRelation.Relation,
-	// 			&tpl.Subject.Namespace,
-	// 			&tpl.Subject.ObjectId,
-	// 			&tpl.Subject.Relation,
-	// 		)
-	// 		if err != nil {
-	// 			return fmt.Errorf(errUnableToWriteRelationships, err)
-	// 		}
-	//
-	// 		tplString := tuple.StringWithoutCaveat(tpl)
-	// 		_, ok := touchMutationsByNonCaveat[tplString]
-	// 		if !ok {
-	// 			return spiceerrors.MustBugf("missing expected completed TOUCH mutation")
-	// 		}
-	//
-	// 		delete(touchMutationsByNonCaveat, tplString)
-	// 	}
-	// 	rows.Close()
-	//
-	// 	// For each remaining TOUCH mutation, add a DELETE operation for the row iff the caveat and/or
-	// 	// context has changed. For ones in which the caveat name and/or context did not change, there is
-	// 	// no need to replace the row, as it is already present.
-	// 	for _, mut := range touchMutationsByNonCaveat {
-	// 		deleteClauses = append(deleteClauses, exactRelationshipDifferentCaveatClause(mut.Tuple))
-	// 	}
-	// }
-
-	// // Execute the DELETE operation for any DELETE mutations or TOUCH mutations that matched existing
-	// // relationships and whose caveat name or context is different in some manner. We use RETURNING
-	// // to determine which TOUCHed relationships were deleted by virtue of their caveat name and/or
-	// // context being changed.
-	// if len(deleteClauses) == 0 {
-	// 	// Nothing more to do.
-	// 	return nil
-	// }
-	//
-	// builder := deleteTuple.
-	// 	Where(deleteClauses).
-	// 	Suffix(fmt.Sprintf("RETURNING %s, %s, %s, %s, %s, %s",
-	// 		colNamespace,
-	// 		colObjectID,
-	// 		colRelation,
-	// 		colUsersetNamespace,
-	// 		colUsersetObjectID,
-	// 		colUsersetRelation,
-	// 	))
-	//
-	// sql, args, err := builder.
-	// 	Set(colDeletedXid, rwt.newXID).
-	// 	ToSql()
-	// if err != nil {
-	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
-	// }
-	//
-	// rows, err := rwt.tx.Query(ctx, sql, args...)
-	// if err != nil {
-	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
-	// }
-	// defer rows.Close()
-	//
-	// // For each deleted row representing a TOUCH, recreate with the new caveat and/or context.
-	// touchWrite := writeTuple
-	// touchWriteHasValues := false
-	//
-	// deletedTpl := &core.RelationTuple{
-	// 	ResourceAndRelation: &core.ObjectAndRelation{},
-	// 	Subject:             &core.ObjectAndRelation{},
-	// }
-	//
-	// for rows.Next() {
-	// 	err := rows.Scan(
-	// 		&deletedTpl.ResourceAndRelation.Namespace,
-	// 		&deletedTpl.ResourceAndRelation.ObjectId,
-	// 		&deletedTpl.ResourceAndRelation.Relation,
-	// 		&deletedTpl.Subject.Namespace,
-	// 		&deletedTpl.Subject.ObjectId,
-	// 		&deletedTpl.Subject.Relation,
-	// 	)
-	// 	if err != nil {
-	// 		return fmt.Errorf(errUnableToWriteRelationships, err)
-	// 	}
-	//
-	// 	tplString := tuple.StringWithoutCaveat(deletedTpl)
-	// 	mutation, ok := touchMutationsByNonCaveat[tplString]
-	// 	if !ok {
-	// 		// This did not represent a TOUCH operation.
-	// 		continue
-	// 	}
-	//
-	// 	touchWrite = appendForInsertion(touchWrite, mutation.Tuple)
-	// 	touchWriteHasValues = true
-	// }
-	// rows.Close()
-	//
-	// // If no INSERTs are necessary to update caveats, then nothing more to do.
-	// if !touchWriteHasValues {
-	// 	return nil
-	// }
-	//
-	// // Otherwise execute the INSERTs for the caveated-changes TOUCHed relationships.
-	// sql, args, err = touchWrite.ToSql()
-	// if err != nil {
-	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
-	// }
-	//
-	// _, err = rwt.tx.Exec(ctx, sql, args...)
-	// if err != nil {
-	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
-	// }
+	// Run CREATE and TOUCH insertions, if any.
+	if len(insertionTuples) > 0 || len(touchTuples) > 0 {
+		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
+			return fmt.Errorf("failed to insert tuples: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -429,14 +324,20 @@ func writeDefinitions[T coreDefinition](
 	return nil
 }
 
-func appendForInsertion(b sq.InsertBuilder, t *core.RelationTuple, rev revisions.TimestampRevision) sq.InsertBuilder {
+func appendForInsertion(
+	b sq.InsertBuilder,
+	t *core.RelationTuple,
+	rev revisions.TimestampRevision,
+) (sq.InsertBuilder, error) {
 	var caveatName *string
-	var caveatContext *string
+	var caveatContext *[]byte
 	if t.GetCaveat() != nil {
 		caveatName = &t.GetCaveat().CaveatName
-		if s := t.GetCaveat().GetContext().String(); len(s) > 0 {
-			caveatContext = &s
+		cc, err := t.GetCaveat().GetContext().MarshalJSON()
+		if err != nil {
+			return b, err
 		}
+		caveatContext = &cc
 	}
 
 	valuesToWrite := []interface{}{
@@ -447,11 +348,11 @@ func appendForInsertion(b sq.InsertBuilder, t *core.RelationTuple, rev revisions
 		t.GetSubject().GetObjectId(),
 		t.GetSubject().GetRelation(),
 		caveatName,
-		types.NullableJSONDocumentValue(caveatContext),
+		types.NullableJSONDocumentValueFromBytes(caveatContext),
 		rev.TimestampNanoSec(),
 	}
 
-	return b.Values(valuesToWrite...)
+	return b.Values(valuesToWrite...), nil
 }
 
 func exactRelationshipClause(r *core.RelationTuple) sq.Eq {

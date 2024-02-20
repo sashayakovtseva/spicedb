@@ -236,7 +236,9 @@ func TestYDBReadWriterRelationships(t *testing.T) {
 			Caveat: &core.ContextualizedCaveat{
 				CaveatName: "on_weekend",
 				Context: &structpb.Struct{
-					Fields: map[string]*structpb.Value{},
+					Fields: map[string]*structpb.Value{
+						"foo": structpb.NewBoolValue(true),
+					},
 				},
 			},
 		},
@@ -249,6 +251,47 @@ func TestYDBReadWriterRelationships(t *testing.T) {
 			Subject: &core.ObjectAndRelation{
 				Namespace: "user",
 				ObjectId:  "fred",
+			},
+		},
+		2: {
+			ResourceAndRelation: &core.ObjectAndRelation{
+				Namespace: "document",
+				ObjectId:  "seconddoc",
+				Relation:  "reader",
+			},
+			Subject: &core.ObjectAndRelation{
+				Namespace: "user",
+				ObjectId:  "bob",
+			},
+		},
+		3: {
+			ResourceAndRelation: &core.ObjectAndRelation{
+				Namespace: "document",
+				ObjectId:  "firstdoc",
+				Relation:  "owner",
+			},
+			Subject: &core.ObjectAndRelation{
+				Namespace: "user",
+				ObjectId:  "bob",
+			},
+			Caveat: &core.ContextualizedCaveat{
+				CaveatName: "with_ip",
+				Context: &structpb.Struct{
+					Fields: map[string]*structpb.Value{
+						"bar": structpb.NewBoolValue(false),
+					},
+				},
+			},
+		},
+		4: {
+			ResourceAndRelation: &core.ObjectAndRelation{
+				Namespace: "document",
+				ObjectId:  "seconddoc",
+				Relation:  "reader",
+			},
+			Subject: &core.ObjectAndRelation{
+				Namespace: "user",
+				ObjectId:  "alice",
 			},
 		},
 	}
@@ -350,4 +393,82 @@ func TestYDBReadWriterRelationships(t *testing.T) {
 			OptionalResourceIds: []string{"firstdoc"},
 		}, testRelations[:2])
 	})
+
+	var touchRev datastore.Revision
+	t.Run("touch operation", func(t *testing.T) {
+		var err error
+		touchRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteRelationships(ctx, []*core.RelationTupleUpdate{
+					{
+						Operation: core.RelationTupleUpdate_TOUCH,
+						Tuple:     testRelations[0],
+					},
+					{
+						Operation: core.RelationTupleUpdate_TOUCH,
+						Tuple:     testRelations[2],
+					},
+				})
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, touchRev)
+
+	t.Run("read relationships after touch", func(t *testing.T) {
+		testQueryRelationships(t, touchRev, datastore.RelationshipsFilter{
+			ResourceType: "document",
+		}, []*core.RelationTuple{testRelations[0], testRelations[2]})
+	})
+
+	var touchCaveatRev datastore.Revision
+	t.Run("touch operation with caveat update", func(t *testing.T) {
+		var err error
+		touchCaveatRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteRelationships(ctx, []*core.RelationTupleUpdate{
+					{
+						Operation: core.RelationTupleUpdate_TOUCH,
+						Tuple:     testRelations[2],
+					},
+					{
+						Operation: core.RelationTupleUpdate_TOUCH,
+						Tuple:     testRelations[3],
+					},
+				})
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, touchCaveatRev)
+
+	t.Run("read relationships after touch", func(t *testing.T) {
+		testQueryRelationships(t, touchCaveatRev, datastore.RelationshipsFilter{
+			ResourceType: "document",
+		}, []*core.RelationTuple{testRelations[3], testRelations[2]})
+	})
+
+	var pkErrRev datastore.Revision
+	t.Run("ensure pk duplicates are not possible", func(t *testing.T) {
+		var err error
+		pkErrRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteRelationships(ctx, []*core.RelationTupleUpdate{
+					{
+						Operation: core.RelationTupleUpdate_TOUCH,
+						Tuple:     testRelations[4],
+					},
+					{
+						Operation: core.RelationTupleUpdate_CREATE,
+						Tuple:     testRelations[4],
+					},
+				})
+			},
+		)
+		require.Error(t, err)
+	})
+	require.Equal(t, datastore.NoRevision, pkErrRev)
 }
