@@ -18,7 +18,7 @@ import (
 	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
-	corev1 "github.com/authzed/spicedb/pkg/proto/core/v1"
+	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
 const (
@@ -47,6 +47,7 @@ const (
 	colUsersetRelation  = "userset_relation"
 	colCaveatName       = "caveat_name"
 	colCaveatContext    = "caveat_context"
+	ixUqRelationLiving  = "uq_relation_tuple_living"
 )
 
 var (
@@ -85,7 +86,18 @@ var (
 		colCaveatName,
 		colCaveatContext,
 	).From(tableRelationTuple)
-	deleteRelationBuilder = sq.Update(tableRelationTuple).Where(livingObjectPredicate)
+	deleteRelationBuilder  = sq.Update(tableRelationTuple).Where(livingObjectPredicate)
+	insertRelationsBuilder = sq.Insert(tableRelationTuple).Columns(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		colCaveatContext,
+		colCreatedAtUnixNano,
+	)
 )
 
 type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
@@ -181,7 +193,7 @@ func toYQLWrapper(b sq.SelectBuilder) (string, []any, error) {
 }
 
 func newYDBCommonQueryExecutor(tablePathPrefix string, ydbExecutor queryExecutor) common.ExecuteQueryFunc {
-	return func(ctx context.Context, sql string, args []any) ([]*corev1.RelationTuple, error) {
+	return func(ctx context.Context, sql string, args []any) ([]*core.RelationTuple, error) {
 		span := trace.SpanFromContext(ctx)
 		return queryTuples(ctx, tablePathPrefix, sql, args, span, ydbExecutor)
 	}
@@ -195,7 +207,7 @@ func queryTuples(
 	args []any,
 	span trace.Span,
 	ydbExecutor queryExecutor,
-) ([]*corev1.RelationTuple, error) {
+) ([]*core.RelationTuple, error) {
 	params := table.NewQueryParameters()
 	for _, a := range args {
 		params.Add(a.(table.ParameterOption))
@@ -210,12 +222,12 @@ func queryTuples(
 
 	span.AddEvent("Query issued to database")
 
-	var tuples []*corev1.RelationTuple
+	var tuples []*core.RelationTuple
 	for res.NextResultSet(ctx) {
 		for res.NextRow() {
-			nextTuple := &corev1.RelationTuple{
-				ResourceAndRelation: &corev1.ObjectAndRelation{},
-				Subject:             &corev1.ObjectAndRelation{},
+			nextTuple := &core.RelationTuple{
+				ResourceAndRelation: &core.ObjectAndRelation{},
+				Subject:             &core.ObjectAndRelation{},
 			}
 			var caveatName *string
 			var caveatCtx *[]byte
@@ -264,7 +276,17 @@ func executeDeleteQuery(
 	deleteRev revisions.TimestampRevision,
 	pred sq.Sqlizer,
 ) error {
-	sql, args, err := b.Set(colDeletedAtUnixNano, deleteRev.TimestampNanoSec()).Where(pred).ToYdbSql()
+	return executeQuery(
+		ctx,
+		tablePathPrefix,
+		executor,
+		b.Set(colDeletedAtUnixNano, deleteRev.TimestampNanoSec()).Where(pred),
+	)
+}
+
+// executeQuery is a helper for queries that don't care about result set.
+func executeQuery(ctx context.Context, tablePathPrefix string, executor queryExecutor, q sq.YdbSqlizer) error {
+	sql, args, err := q.ToYdbSql()
 	if err != nil {
 		return fmt.Errorf("failed to build query: %w", err)
 	}
