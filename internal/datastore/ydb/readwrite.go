@@ -8,11 +8,15 @@ import (
 	v1 "github.com/authzed/authzed-go/proto/authzed/api/v1"
 	"github.com/jzelinskie/stringz"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
+	"go.opentelemetry.io/otel/trace"
 
+	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
+	"github.com/authzed/spicedb/pkg/spiceerrors"
 )
 
 type ydbReadWriter struct {
@@ -49,8 +53,208 @@ func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) erro
 }
 
 func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
-	// TODO implement me
-	panic("implement me")
+	// touchMutationsByNonCaveat := make(map[string]*core.RelationTupleUpdate, len(mutations))
+
+	insertBuilder := insertRelationsBuilder
+
+	// touchInserts := insertRelationsBuilder
+	// deleteClauses := sq.Or{}
+	//
+
+	var insertionTuples []*core.RelationTuple
+
+	// Parse the updates, building inserts for CREATE/TOUCH and deletes for DELETE.
+	for _, mut := range mutations {
+		tpl := mut.GetTuple()
+
+		switch mut.GetOperation() {
+		case core.RelationTupleUpdate_CREATE:
+			insertBuilder = appendForInsertion(insertBuilder, tpl, rw.newRevision)
+			insertionTuples = append(insertionTuples, tpl)
+
+		// case core.RelationTupleUpdate_TOUCH:
+		// 	touchMutationsByNonCaveat[tuple.StringWithoutCaveat(tpl)] = mut
+		// 	touchInserts = appendForInsertion(touchInserts, tpl, rw.newRevision)
+		//
+		// case core.RelationTupleUpdate_DELETE:
+		// 	deleteClauses = append(deleteClauses, sq.Eq{
+		// 		colNamespace:        tpl.GetResourceAndRelation().GetNamespace(),
+		// 		colObjectID:         tpl.GetResourceAndRelation().GetObjectId(),
+		// 		colRelation:         tpl.GetResourceAndRelation().GetRelation(),
+		// 		colUsersetNamespace: tpl.GetSubject().GetNamespace(),
+		// 		colUsersetObjectID:  tpl.GetSubject().GetObjectId(),
+		// 		colUsersetRelation:  tpl.GetSubject().GetRelation(),
+		// 	})
+
+		default:
+			return spiceerrors.MustBugf("unknown tuple mutation: %v", mut)
+		}
+	}
+
+	// Perform SELECT queries first as a part of uniqueness check.
+	if len(insertionTuples) > 0 {
+		dups, err := rw.selectTuples(ctx, insertionTuples)
+		if err != nil {
+			return fmt.Errorf("failed to ensure tuples uniqueness: %w", err)
+		}
+		if len(dups) > 0 {
+			return datastoreCommon.NewCreateRelationshipExistsError(dups[0])
+		}
+	}
+
+	// Run CREATE insertions, if any.
+	if len(insertionTuples) > 0 {
+		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
+			return fmt.Errorf("failed to insert tuples: %w", err)
+		}
+	}
+
+	// // For each of the TOUCH operations, invoke the INSERTs, but with `ON CONFLICT DO NOTHING` to ensure
+	// // that the operations over existing relationships no-op.
+	// if len(touchMutationsByNonCaveat) > 0 {
+	// 	touchInserts = touchInserts.Suffix(fmt.Sprintf("ON CONFLICT DO NOTHING RETURNING %s, %s, %s, %s, %s, %s",
+	// 		colNamespace,
+	// 		colObjectID,
+	// 		colRelation,
+	// 		colUsersetNamespace,
+	// 		colUsersetObjectID,
+	// 		colUsersetRelation,
+	// 	))
+	//
+	// 	sql, args, err := touchInserts.ToSql()
+	// 	if err != nil {
+	// 		return fmt.Errorf(errUnableToWriteRelationships, err)
+	// 	}
+	//
+	// 	rows, err := rwt.tx.Query(ctx, sql, args...)
+	// 	if err != nil {
+	// 		return fmt.Errorf(errUnableToWriteRelationships, err)
+	// 	}
+	// 	defer rows.Close()
+	//
+	// 	// Remove from the TOUCH map of operations each row that was successfully inserted.
+	// 	// This will cover any TOUCH that created an entirely new relationship, acting like
+	// 	// a CREATE.
+	// 	tpl := &core.RelationTuple{
+	// 		ResourceAndRelation: &core.ObjectAndRelation{},
+	// 		Subject:             &core.ObjectAndRelation{},
+	// 	}
+	//
+	// 	for rows.Next() {
+	// 		err := rows.Scan(
+	// 			&tpl.ResourceAndRelation.Namespace,
+	// 			&tpl.ResourceAndRelation.ObjectId,
+	// 			&tpl.ResourceAndRelation.Relation,
+	// 			&tpl.Subject.Namespace,
+	// 			&tpl.Subject.ObjectId,
+	// 			&tpl.Subject.Relation,
+	// 		)
+	// 		if err != nil {
+	// 			return fmt.Errorf(errUnableToWriteRelationships, err)
+	// 		}
+	//
+	// 		tplString := tuple.StringWithoutCaveat(tpl)
+	// 		_, ok := touchMutationsByNonCaveat[tplString]
+	// 		if !ok {
+	// 			return spiceerrors.MustBugf("missing expected completed TOUCH mutation")
+	// 		}
+	//
+	// 		delete(touchMutationsByNonCaveat, tplString)
+	// 	}
+	// 	rows.Close()
+	//
+	// 	// For each remaining TOUCH mutation, add a DELETE operation for the row iff the caveat and/or
+	// 	// context has changed. For ones in which the caveat name and/or context did not change, there is
+	// 	// no need to replace the row, as it is already present.
+	// 	for _, mut := range touchMutationsByNonCaveat {
+	// 		deleteClauses = append(deleteClauses, exactRelationshipDifferentCaveatClause(mut.Tuple))
+	// 	}
+	// }
+
+	// // Execute the DELETE operation for any DELETE mutations or TOUCH mutations that matched existing
+	// // relationships and whose caveat name or context is different in some manner. We use RETURNING
+	// // to determine which TOUCHed relationships were deleted by virtue of their caveat name and/or
+	// // context being changed.
+	// if len(deleteClauses) == 0 {
+	// 	// Nothing more to do.
+	// 	return nil
+	// }
+	//
+	// builder := deleteTuple.
+	// 	Where(deleteClauses).
+	// 	Suffix(fmt.Sprintf("RETURNING %s, %s, %s, %s, %s, %s",
+	// 		colNamespace,
+	// 		colObjectID,
+	// 		colRelation,
+	// 		colUsersetNamespace,
+	// 		colUsersetObjectID,
+	// 		colUsersetRelation,
+	// 	))
+	//
+	// sql, args, err := builder.
+	// 	Set(colDeletedXid, rwt.newXID).
+	// 	ToSql()
+	// if err != nil {
+	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
+	// }
+	//
+	// rows, err := rwt.tx.Query(ctx, sql, args...)
+	// if err != nil {
+	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
+	// }
+	// defer rows.Close()
+	//
+	// // For each deleted row representing a TOUCH, recreate with the new caveat and/or context.
+	// touchWrite := writeTuple
+	// touchWriteHasValues := false
+	//
+	// deletedTpl := &core.RelationTuple{
+	// 	ResourceAndRelation: &core.ObjectAndRelation{},
+	// 	Subject:             &core.ObjectAndRelation{},
+	// }
+	//
+	// for rows.Next() {
+	// 	err := rows.Scan(
+	// 		&deletedTpl.ResourceAndRelation.Namespace,
+	// 		&deletedTpl.ResourceAndRelation.ObjectId,
+	// 		&deletedTpl.ResourceAndRelation.Relation,
+	// 		&deletedTpl.Subject.Namespace,
+	// 		&deletedTpl.Subject.ObjectId,
+	// 		&deletedTpl.Subject.Relation,
+	// 	)
+	// 	if err != nil {
+	// 		return fmt.Errorf(errUnableToWriteRelationships, err)
+	// 	}
+	//
+	// 	tplString := tuple.StringWithoutCaveat(deletedTpl)
+	// 	mutation, ok := touchMutationsByNonCaveat[tplString]
+	// 	if !ok {
+	// 		// This did not represent a TOUCH operation.
+	// 		continue
+	// 	}
+	//
+	// 	touchWrite = appendForInsertion(touchWrite, mutation.Tuple)
+	// 	touchWriteHasValues = true
+	// }
+	// rows.Close()
+	//
+	// // If no INSERTs are necessary to update caveats, then nothing more to do.
+	// if !touchWriteHasValues {
+	// 	return nil
+	// }
+	//
+	// // Otherwise execute the INSERTs for the caveated-changes TOUCHed relationships.
+	// sql, args, err = touchWrite.ToSql()
+	// if err != nil {
+	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
+	// }
+	//
+	// _, err = rwt.tx.Exec(ctx, sql, args...)
+	// if err != nil {
+	// 	return fmt.Errorf(errUnableToWriteRelationships, err)
+	// }
+
+	return nil
 }
 
 // DeleteRelationships deletes all Relationships that match the provided filter.
@@ -135,6 +339,29 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 	panic("implement me")
 }
 
+func (rw *ydbReadWriter) selectTuples(
+	ctx context.Context,
+	in []*core.RelationTuple,
+) ([]*core.RelationTuple, error) {
+	span := trace.SpanFromContext(ctx)
+
+	if len(in) == 0 {
+		return nil, nil
+	}
+
+	var pred sq.Or
+	for _, r := range in {
+		pred = append(pred, exactRelationshipClause(r))
+	}
+
+	sql, args, err := rw.modifier(readRelationBuilder).View(ixUqRelationLiving).Where(pred).ToYdbSql()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	return queryTuples(ctx, rw.tablePathPrefix, sql, table.NewQueryParameters(args...), span, rw.executor)
+}
+
 type coreDefinition interface {
 	MarshalVT() ([]byte, error)
 	GetName() string
@@ -162,8 +389,7 @@ func writeDefinitions[T coreDefinition](
 			return fmt.Errorf("failed to marshal definition: %w", err)
 		}
 
-		valuesToWrite := []any{def.GetName(), definitionBytes, writeRev.TimestampNanoSec()}
-		b = b.Values(valuesToWrite...)
+		b = b.Values(def.GetName(), definitionBytes, writeRev.TimestampNanoSec())
 		names = append(names, def.GetName())
 	}
 
@@ -192,4 +418,40 @@ func writeDefinitions[T coreDefinition](
 	defer res.Close()
 
 	return nil
+}
+
+func appendForInsertion(b sq.InsertBuilder, t *core.RelationTuple, rev revisions.TimestampRevision) sq.InsertBuilder {
+	var caveatName *string
+	var caveatContext *string
+	if t.GetCaveat() != nil {
+		caveatName = &t.GetCaveat().CaveatName
+		if s := t.GetCaveat().GetContext().String(); len(s) > 0 {
+			caveatContext = &s
+		}
+	}
+
+	valuesToWrite := []interface{}{
+		t.GetResourceAndRelation().GetNamespace(),
+		t.GetResourceAndRelation().GetObjectId(),
+		t.GetResourceAndRelation().GetRelation(),
+		t.GetSubject().GetNamespace(),
+		t.GetSubject().GetObjectId(),
+		t.GetSubject().GetRelation(),
+		caveatName,
+		types.NullableJSONDocumentValue(caveatContext),
+		rev.TimestampNanoSec(),
+	}
+
+	return b.Values(valuesToWrite...)
+}
+
+func exactRelationshipClause(r *core.RelationTuple) sq.Eq {
+	return sq.Eq{
+		colNamespace:        r.GetResourceAndRelation().GetNamespace(),
+		colObjectID:         r.GetResourceAndRelation().GetObjectId(),
+		colRelation:         r.GetResourceAndRelation().GetRelation(),
+		colUsersetNamespace: r.GetSubject().GetNamespace(),
+		colUsersetObjectID:  r.GetSubject().GetObjectId(),
+		colUsersetRelation:  r.GetSubject().GetRelation(),
+	}
 }

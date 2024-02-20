@@ -6,7 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
+	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/pkg/caveats"
 	caveattypes "github.com/authzed/spicedb/pkg/caveats/types"
 	"github.com/authzed/spicedb/pkg/datastore"
@@ -209,5 +211,102 @@ func TestYDBReadWriterNamespaces(t *testing.T) {
 		actual, err := r.ListAllNamespaces(context.Background())
 		require.NoError(t, err)
 		require.Empty(t, actual)
+	})
+}
+
+func TestYDBReadWriterRelationships(t *testing.T) {
+	ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+		ds, err := NewYDBDatastore(context.Background(), dsn)
+		require.NoError(t, err)
+		return ds
+	})
+	t.Cleanup(func() { ds.Close() })
+
+	testRelations := []*core.RelationTuple{
+		0: {
+			ResourceAndRelation: &core.ObjectAndRelation{
+				Namespace: "document",
+				ObjectId:  "firstdoc",
+				Relation:  "owner",
+			},
+			Subject: &core.ObjectAndRelation{
+				Namespace: "user",
+				ObjectId:  "bob",
+			},
+			Caveat: &core.ContextualizedCaveat{
+				CaveatName: "on_weekend",
+				Context: &structpb.Struct{
+					Fields: map[string]*structpb.Value{},
+				},
+			},
+		},
+		1: {
+			ResourceAndRelation: &core.ObjectAndRelation{
+				Namespace: "document",
+				ObjectId:  "firstdoc",
+				Relation:  "reader",
+			},
+			Subject: &core.ObjectAndRelation{
+				Namespace: "user",
+				ObjectId:  "fred",
+			},
+		},
+	}
+
+	var initialRev datastore.Revision
+	t.Run("initial write", func(t *testing.T) {
+		var err error
+		initialRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteRelationships(ctx, []*core.RelationTupleUpdate{
+					{
+						Operation: core.RelationTupleUpdate_CREATE,
+						Tuple:     testRelations[0],
+					},
+					{
+						Operation: core.RelationTupleUpdate_CREATE,
+						Tuple:     testRelations[1],
+					},
+				})
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, initialRev)
+
+	t.Run("read written relationships", func(t *testing.T) {
+		r := ds.SnapshotReader(initialRev)
+		it, err := r.QueryRelationships(context.Background(), datastore.RelationshipsFilter{
+			ResourceType:        "document",
+			OptionalResourceIds: []string{"firstdoc"},
+		})
+		require.NoError(t, err)
+		t.Cleanup(it.Close)
+
+		var i int
+		for tpl := it.Next(); tpl != nil; tpl = it.Next() {
+			require.True(t, proto.Equal(tpl, testRelations[i]))
+			i++
+		}
+		require.Equal(t, 2, i)
+	})
+
+	t.Run("ensure duplicate check works", func(t *testing.T) {
+		rev, err := ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteRelationships(ctx, []*core.RelationTupleUpdate{
+					{
+						Operation: core.RelationTupleUpdate_CREATE,
+						Tuple:     testRelations[0],
+					},
+				})
+			},
+		)
+		var dsErr datastoreCommon.CreateRelationshipExistsError
+		require.ErrorAs(t, err, &dsErr)
+		require.True(t, proto.Equal(dsErr.Relationship, testRelations[0]))
+		require.Equal(t, datastore.NoRevision, rev)
 	})
 }

@@ -195,7 +195,13 @@ func toYQLWrapper(b sq.SelectBuilder) (string, []any, error) {
 func newYDBCommonQueryExecutor(tablePathPrefix string, ydbExecutor queryExecutor) common.ExecuteQueryFunc {
 	return func(ctx context.Context, sql string, args []any) ([]*core.RelationTuple, error) {
 		span := trace.SpanFromContext(ctx)
-		return queryTuples(ctx, tablePathPrefix, sql, args, span, ydbExecutor)
+
+		params := table.NewQueryParameters()
+		for _, a := range args {
+			params.Add(a.(table.ParameterOption))
+		}
+
+		return queryTuples(ctx, tablePathPrefix, sql, params, span, ydbExecutor)
 	}
 }
 
@@ -204,15 +210,10 @@ func queryTuples(
 	ctx context.Context,
 	tablePathPrefix string,
 	query string,
-	args []any,
+	params *table.QueryParameters,
 	span trace.Span,
 	ydbExecutor queryExecutor,
 ) ([]*core.RelationTuple, error) {
-	params := table.NewQueryParameters()
-	for _, a := range args {
-		params.Add(a.(table.ParameterOption))
-	}
-
 	query = ydbCommon.AddTablePrefix(query, tablePathPrefix)
 	res, err := ydbExecutor.Execute(ctx, query, params)
 	if err != nil {
