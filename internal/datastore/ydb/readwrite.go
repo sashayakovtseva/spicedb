@@ -56,12 +56,14 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 	// touchMutationsByNonCaveat := make(map[string]*core.RelationTupleUpdate, len(mutations))
 
 	insertBuilder := insertRelationsBuilder
+	deleteBuilder := deleteRelationBuilder
 
 	// touchInserts := insertRelationsBuilder
-	// deleteClauses := sq.Or{}
-	//
 
-	var insertionTuples []*core.RelationTuple
+	var (
+		insertionTuples []*core.RelationTuple
+		deleteClauses   sq.Or
+	)
 
 	// Parse the updates, building inserts for CREATE/TOUCH and deletes for DELETE.
 	for _, mut := range mutations {
@@ -75,16 +77,9 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 		// case core.RelationTupleUpdate_TOUCH:
 		// 	touchMutationsByNonCaveat[tuple.StringWithoutCaveat(tpl)] = mut
 		// 	touchInserts = appendForInsertion(touchInserts, tpl, rw.newRevision)
-		//
-		// case core.RelationTupleUpdate_DELETE:
-		// 	deleteClauses = append(deleteClauses, sq.Eq{
-		// 		colNamespace:        tpl.GetResourceAndRelation().GetNamespace(),
-		// 		colObjectID:         tpl.GetResourceAndRelation().GetObjectId(),
-		// 		colRelation:         tpl.GetResourceAndRelation().GetRelation(),
-		// 		colUsersetNamespace: tpl.GetSubject().GetNamespace(),
-		// 		colUsersetObjectID:  tpl.GetSubject().GetObjectId(),
-		// 		colUsersetRelation:  tpl.GetSubject().GetRelation(),
-		// 	})
+
+		case core.RelationTupleUpdate_DELETE:
+			deleteClauses = append(deleteClauses, exactRelationshipClause(tpl))
 
 		default:
 			return spiceerrors.MustBugf("unknown tuple mutation: %v", mut)
@@ -106,6 +101,20 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 	if len(insertionTuples) > 0 {
 		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
 			return fmt.Errorf("failed to insert tuples: %w", err)
+		}
+	}
+
+	// Run DELETE updates, if any.
+	if len(deleteClauses) > 0 {
+		if err := executeDeleteQuery(
+			ctx,
+			rw.tablePathPrefix,
+			rw.executor,
+			deleteBuilder,
+			rw.newRevision,
+			deleteClauses,
+		); err != nil {
+			return fmt.Errorf("failed to delete tuples: %w", err)
 		}
 	}
 

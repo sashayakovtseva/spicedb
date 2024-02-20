@@ -253,6 +253,25 @@ func TestYDBReadWriterRelationships(t *testing.T) {
 		},
 	}
 
+	testQueryRelationships := func(
+		t *testing.T,
+		rev datastore.Revision,
+		filter datastore.RelationshipsFilter,
+		expect []*core.RelationTuple,
+	) {
+		r := ds.SnapshotReader(rev)
+		it, err := r.QueryRelationships(context.Background(), filter)
+		require.NoError(t, err)
+		t.Cleanup(it.Close)
+
+		var i int
+		for tpl := it.Next(); tpl != nil; tpl = it.Next() {
+			require.True(t, proto.Equal(tpl, expect[i]))
+			i++
+		}
+		require.Equal(t, len(expect), i)
+	}
+
 	var initialRev datastore.Revision
 	t.Run("initial write", func(t *testing.T) {
 		var err error
@@ -276,20 +295,10 @@ func TestYDBReadWriterRelationships(t *testing.T) {
 	require.NotNil(t, initialRev)
 
 	t.Run("read written relationships", func(t *testing.T) {
-		r := ds.SnapshotReader(initialRev)
-		it, err := r.QueryRelationships(context.Background(), datastore.RelationshipsFilter{
+		testQueryRelationships(t, initialRev, datastore.RelationshipsFilter{
 			ResourceType:        "document",
 			OptionalResourceIds: []string{"firstdoc"},
-		})
-		require.NoError(t, err)
-		t.Cleanup(it.Close)
-
-		var i int
-		for tpl := it.Next(); tpl != nil; tpl = it.Next() {
-			require.True(t, proto.Equal(tpl, testRelations[i]))
-			i++
-		}
-		require.Equal(t, 2, i)
+		}, testRelations[:2])
 	})
 
 	t.Run("ensure duplicate check works", func(t *testing.T) {
@@ -308,5 +317,37 @@ func TestYDBReadWriterRelationships(t *testing.T) {
 		require.ErrorAs(t, err, &dsErr)
 		require.True(t, proto.Equal(dsErr.Relationship, testRelations[0]))
 		require.Equal(t, datastore.NoRevision, rev)
+	})
+
+	var deleteRev datastore.Revision
+	t.Run("delete relationship", func(t *testing.T) {
+		var err error
+		deleteRev, err = ds.ReadWriteTx(
+			context.Background(),
+			func(ctx context.Context, tx datastore.ReadWriteTransaction) error {
+				return tx.WriteRelationships(ctx, []*core.RelationTupleUpdate{
+					{
+						Operation: core.RelationTupleUpdate_DELETE,
+						Tuple:     testRelations[1],
+					},
+				})
+			},
+		)
+		require.NoError(t, err)
+	})
+	require.NotNil(t, deleteRev)
+
+	t.Run("read relationships after delete", func(t *testing.T) {
+		testQueryRelationships(t, deleteRev, datastore.RelationshipsFilter{
+			ResourceType:        "document",
+			OptionalResourceIds: []string{"firstdoc"},
+		}, testRelations[:1])
+	})
+
+	t.Run("ensure snapshot read sees deleted relationships", func(t *testing.T) {
+		testQueryRelationships(t, initialRev, datastore.RelationshipsFilter{
+			ResourceType:        "document",
+			OptionalResourceIds: []string{"firstdoc"},
+		}, testRelations[:2])
 	})
 }
