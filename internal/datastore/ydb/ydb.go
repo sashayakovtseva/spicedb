@@ -3,6 +3,7 @@ package ydb
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
@@ -53,6 +54,9 @@ type ydbDatastore struct {
 	config *ydbConfig
 
 	originalDSN string
+
+	// isClosed used in HeadRevision only to pass datastore tests
+	isClosed atomic.Bool
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
@@ -102,6 +106,7 @@ func (y *ydbDatastore) Close() error {
 		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
 	}
 
+	y.isClosed.Store(true)
 	return nil
 }
 
@@ -188,6 +193,10 @@ func (y *ydbDatastore) ReadWriteTx(
 }
 
 func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
+	if y.isClosed.Load() {
+		return datastore.NoRevision, fmt.Errorf("datastore is closed")
+	}
+
 	now := truetime.UnixNano()
 	return revisions.NewForTimestamp(now), nil
 }
