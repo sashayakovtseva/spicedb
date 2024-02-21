@@ -10,6 +10,7 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
 	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
@@ -37,6 +38,7 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 		deleteCaveatBuilder,
 		colName,
 		caveats,
+		true,
 	)
 }
 
@@ -209,6 +211,7 @@ func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, namespaces ...*cor
 		deleteNamespaceBuilder,
 		colNamespace,
 		namespaces,
+		false,
 	)
 }
 
@@ -269,6 +272,7 @@ func (rw *ydbReadWriter) selectTuples(
 type coreDefinition interface {
 	MarshalVT() ([]byte, error)
 	GetName() string
+	proto.Message
 }
 
 // writeDefinitions is a generic func to upsert caveats or namespaces.
@@ -281,14 +285,27 @@ func writeDefinitions[T coreDefinition](
 	d sq.UpdateBuilder,
 	colName string,
 	defs []T,
+	useVT bool,
 ) error {
 	if len(defs) == 0 {
 		return nil
 	}
 
+	// hack b/c namespace and caveat use different marshal method
+	var marshaler func(def coreDefinition) ([]byte, error)
+	if useVT {
+		marshaler = func(def coreDefinition) ([]byte, error) {
+			return def.MarshalVT()
+		}
+	} else {
+		marshaler = func(def coreDefinition) ([]byte, error) {
+			return proto.Marshal(def)
+		}
+	}
+
 	names := make([]string, 0, len(defs))
 	for _, def := range defs {
-		definitionBytes, err := def.MarshalVT()
+		definitionBytes, err := marshaler(def)
 		if err != nil {
 			return fmt.Errorf("failed to marshal definition: %w", err)
 		}
