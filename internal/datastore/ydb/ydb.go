@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
@@ -29,6 +30,8 @@ func init() {
 
 var (
 	_ datastore.Datastore = &ydbDatastore{}
+
+	yq = sq.StatementBuilder.PlaceholderFormat(sq.DollarP)
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 

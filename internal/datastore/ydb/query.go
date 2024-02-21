@@ -67,16 +67,16 @@ var (
 		return builder.Where(livingObjectPredicate)
 	})
 
-	readCaveatBuilder   = sq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
-	deleteCaveatBuilder = sq.Update(tableCaveat).Where(livingObjectPredicate)
-	insertCaveatBuilder = sq.Insert(tableCaveat).Columns(colName, colDefinition, colCreatedAtUnixNano)
+	readCaveatBuilder   = yq.Select(colDefinition, colCreatedAtUnixNano).From(tableCaveat)
+	deleteCaveatBuilder = yq.Update(tableCaveat).Where(livingObjectPredicate)
+	insertCaveatBuilder = yq.Insert(tableCaveat).Columns(colName, colDefinition, colCreatedAtUnixNano)
 
-	readNamespaceBuilder   = sq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
-	deleteNamespaceBuilder = sq.Update(tableNamespaceConfig).Where(livingObjectPredicate)
-	insertNamespaceBuilder = sq.Insert(tableNamespaceConfig).
+	readNamespaceBuilder   = yq.Select(colSerializedConfig, colCreatedAtUnixNano).From(tableNamespaceConfig)
+	deleteNamespaceBuilder = yq.Update(tableNamespaceConfig).Where(livingObjectPredicate)
+	insertNamespaceBuilder = yq.Insert(tableNamespaceConfig).
 				Columns(colNamespace, colSerializedConfig, colCreatedAtUnixNano)
 
-	readRelationBuilder = sq.Select(
+	readRelationBuilder = yq.Select(
 		colNamespace,
 		colObjectID,
 		colRelation,
@@ -86,8 +86,8 @@ var (
 		colCaveatName,
 		colCaveatContext,
 	).From(tableRelationTuple)
-	deleteRelationBuilder  = sq.Update(tableRelationTuple).Where(livingObjectPredicate)
-	insertRelationsBuilder = sq.Insert(tableRelationTuple).Columns(
+	deleteRelationBuilder  = yq.Update(tableRelationTuple).Where(livingObjectPredicate)
+	insertRelationsBuilder = yq.Insert(tableRelationTuple).Columns(
 		colNamespace,
 		colObjectID,
 		colRelation,
@@ -178,7 +178,7 @@ func queryRow(
 }
 
 func toYQLWrapper(b sq.SelectBuilder) (string, []any, error) {
-	query, yqlParams, err := b.ToYdbSql()
+	query, yqlParams, err := b.ToYQL()
 	if err != nil {
 		return "", nil, err
 	}
@@ -286,8 +286,8 @@ func executeDeleteQuery(
 }
 
 // executeQuery is a helper for queries that don't care about result set.
-func executeQuery(ctx context.Context, tablePathPrefix string, executor queryExecutor, q sq.YdbSqlizer) error {
-	sql, args, err := q.ToYdbSql()
+func executeQuery(ctx context.Context, tablePathPrefix string, executor queryExecutor, q sq.Yqliser) error {
+	sql, args, err := q.ToYQL()
 	if err != nil {
 		return fmt.Errorf("failed to build query: %w", err)
 	}

@@ -258,7 +258,7 @@ func (rw *ydbReadWriter) selectTuples(
 		pred = append(pred, exactRelationshipClause(r))
 	}
 
-	sql, args, err := rw.modifier(readRelationBuilder).View(ixUqRelationLiving).Where(pred).ToYdbSql()
+	sql, args, err := rw.modifier(readRelationBuilder).View(ixUqRelationLiving).Where(pred).ToYQL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build query: %w", err)
 	}
@@ -309,7 +309,7 @@ func writeDefinitions[T coreDefinition](
 		return fmt.Errorf("failed to delete existing definitions: %w", err)
 	}
 
-	sql, args, err := b.ToYdbSql()
+	sql, args, err := b.ToYQL()
 	if err != nil {
 		return fmt.Errorf("failed to build insert definitions query: %w", err)
 	}
