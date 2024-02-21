@@ -18,6 +18,8 @@ type ydbConfig struct {
 	gcInterval         time.Duration
 	gcMaxOperationTime time.Duration
 
+	bulkLoadLimit int
+
 	// todo find a way to use it
 	maxRetries uint8
 
@@ -106,4 +108,11 @@ func MaxRevisionStalenessPercent(stalenessPercent float64) Option {
 // This value defaults to 5 seconds.
 func FollowerReadDelay(delay time.Duration) Option {
 	return func(o *ydbConfig) { o.followerReadDelay = delay }
+}
+
+// BulkLoadLimit is the maximum number of insertion a single BulkLoad will process.
+//
+// This value defaults to 5 seconds.
+func BulkLoadLimit(limit int) Option {
+	return func(o *ydbConfig) { o.bulkLoadLimit = limit }
 }

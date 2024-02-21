@@ -23,7 +23,8 @@ import (
 
 type ydbReadWriter struct {
 	*ydbReader
-	newRevision revisions.TimestampRevision
+	bulkLoadLimit int
+	newRevision   revisions.TimestampRevision
 }
 
 // WriteCaveats stores the provided caveats.
@@ -241,9 +242,50 @@ func (rw *ydbReadWriter) DeleteNamespaces(ctx context.Context, names ...string) 
 	return nil
 }
 
+// BulkLoad takes a relationship source iterator, and writes all the
+// relationships to the backing datastore in an optimized fashion. This
+// method can and will omit checks and otherwise cut corners in the
+// interest of performance, and should not be relied upon for OLTP-style
+// workloads.
+// For YDB this is not an effective way insert relationships.
+// Recommended insert bulk size is < 100k. Under the hood this method
+// works just like WriteRelationships with CREATE operation.
 func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteRelationshipSource) (uint64, error) {
-	// TODO implement me
-	panic("implement me")
+	insertBuilder := insertRelationsBuilder
+
+	var (
+		insertionTuples []*core.RelationTuple
+		tpl             *core.RelationTuple
+		err             error
+	)
+
+	tpl, err = iter.Next(ctx)
+	for ; tpl != nil && err == nil && len(insertionTuples) <= rw.bulkLoadLimit; tpl, err = iter.Next(ctx) {
+		insertionTuples = append(insertionTuples, tpl)
+		insertBuilder, err = appendForInsertion(insertBuilder, tpl, rw.newRevision)
+		if err != nil {
+			return 0, fmt.Errorf("failed to append tuple for insertion: %w", err)
+		}
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to read source: %w", err)
+	}
+
+	if len(insertionTuples) > 0 {
+		dups, err := rw.selectTuples(ctx, insertionTuples)
+		if err != nil {
+			return 0, fmt.Errorf("failed to ensure CREATE tuples uniqueness: %w", err)
+		}
+		if len(dups) > 0 {
+			return 0, datastoreCommon.NewCreateRelationshipExistsError(dups[0])
+		}
+	}
+
+	if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
+		return 0, fmt.Errorf("failed to insert tuples: %w", err)
+	}
+
+	return uint64(len(insertionTuples)), nil
 }
 
 func (rw *ydbReadWriter) selectTuples(
