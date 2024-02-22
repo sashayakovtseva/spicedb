@@ -31,7 +31,7 @@ var defaultConfig = ydbConfig{
 	tablePathPrefix:             "",
 	watchBufferLength:           0,
 	watchBufferWriteTimeout:     0,
-	followerReadDelay:           5 * time.Second,
+	followerReadDelay:           0 * time.Second,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
 	gcWindow:                    24 * time.Hour,
@@ -105,7 +105,7 @@ func MaxRevisionStalenessPercent(stalenessPercent float64) Option {
 
 // FollowerReadDelay is the time delay to apply to enable historical reads.
 //
-// This value defaults to 5 seconds.
+// This value defaults to 0 seconds.
 func FollowerReadDelay(delay time.Duration) Option {
 	return func(o *ydbConfig) { o.followerReadDelay = delay }
 }
