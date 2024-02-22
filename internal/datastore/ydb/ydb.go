@@ -183,9 +183,9 @@ func (y *ydbDatastore) ReadWriteTx(
 		newRev = revisions.NewForTimestamp(now)
 
 		rw := &ydbReadWriter{
-			ydbReader:     newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier, false),
-			bulkLoadLimit: y.config.bulkLoadLimit,
-			newRevision:   newRev,
+			ydbReader:         newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier, false),
+			bulkLoadBatchSize: y.config.bulkLoadBatchSize,
+			newRevision:       newRev,
 		}
 
 		return fn(ctx, rw)
