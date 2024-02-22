@@ -59,6 +59,7 @@ func RevisionQuantizationTest(t *testing.T, tester DatastoreTester) {
 			time.Sleep(tc.quantizationRange)
 
 			// Now we should ONLY get revisions later than the now revision
+			// IF follower read delay is set to 0
 			for start := time.Now(); time.Since(start) < 10*time.Millisecond; {
 				testRevision, err := ds.OptimizedRevision(ctx)
 				require.NoError(err)
@@ -141,7 +142,7 @@ func RevisionGCTest(t *testing.T, tester DatastoreTester) {
 	// require.Error(ds.CheckRevision(ctx, head), "expected head revision to be valid if out of GC window")
 	//
 	// latest state of the system is invalid if head revision is out of GC window
-	//_, _, err = ds.SnapshotReader(head).ReadNamespaceByName(ctx, "foo/bar")
+	// _, _, err = ds.SnapshotReader(head).ReadNamespaceByName(ctx, "foo/bar")
 	// require.Error(err, "expected previously written schema to exist at out-of-GC window head")
 
 	// check freshly fetched head revision is valid after GC window elapsed

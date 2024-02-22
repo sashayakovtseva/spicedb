@@ -135,7 +135,7 @@ func NewYDBEngineForTest(bridgeNetworkName string) (RunningEngineForTest, func()
 	}, cleanup, nil
 }
 
-func (r ydbTester) NewDatabase(t testing.TB) string {
+func (y ydbTester) NewDatabase(t testing.TB) string {
 	// there's no easy way to create new database in a local YDB,
 	// so create a new directory instead.
 
@@ -143,13 +143,13 @@ func (r ydbTester) NewDatabase(t testing.TB) string {
 	require.NoError(t, err)
 
 	directory := fmt.Sprintf("/%s/%s", ydbDefaultDatabase, uniquePortion)
-	dsn := fmt.Sprintf("grpc://%s:%d/%s?table_path_prefix=%s", r.hostname, r.port, ydbDefaultDatabase, directory)
+	dsn := fmt.Sprintf("grpc://%s:%d/%s?table_path_prefix=%s", y.hostname, y.port, ydbDefaultDatabase, directory)
 
 	return dsn
 }
 
-func (r ydbTester) NewDatastore(t testing.TB, initFunc InitFunc) datastore.Datastore {
-	dsn := r.NewDatabase(t)
+func (y ydbTester) NewDatastore(t testing.TB, initFunc InitFunc) datastore.Datastore {
+	dsn := y.NewDatabase(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
