@@ -151,11 +151,12 @@ func (y ydbTester) NewDatabase(t testing.TB) string {
 func (y ydbTester) NewDatastore(t testing.TB, initFunc InitFunc) datastore.Datastore {
 	dsn := y.NewDatabase(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
 
 	migrationDriver, err := ydbMigrations.NewYDBDriver(ctx, dsn)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrationDriver.Close(ctx) })
 
 	err = ydbMigrations.YDBMigrations.Run(ctx, migrationDriver, migrate.Head, migrate.LiveRun)
 	require.NoError(t, err)

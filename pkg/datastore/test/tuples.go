@@ -45,7 +45,7 @@ func SimpleTest(t *testing.T, tester DatastoreTester) {
 
 			ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
-			defer ds.Close()
+			t.Cleanup(func() { _ = ds.Close() })
 
 			ctx := context.Background()
 
@@ -263,7 +263,7 @@ func ObjectIDsTest(t *testing.T, tester DatastoreTester) {
 
 			ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
-			defer ds.Close()
+			t.Cleanup(func() { _ = ds.Close() })
 
 			tpl := makeTestTuple(tc, tc)
 			require.NoError(tpl.Validate())
@@ -378,7 +378,7 @@ func DeleteRelationshipsTest(t *testing.T, tester DatastoreTester) {
 
 			ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
-			defer ds.Close()
+			t.Cleanup(func() { _ = ds.Close() })
 
 			setupDatastore(ds, require)
 
@@ -426,7 +426,7 @@ func InvalidReadsTest(t *testing.T, tester DatastoreTester) {
 
 		ds, err := tester.New(0, veryLargeGCInterval, testGCDuration, 1)
 		require.NoError(err)
-		defer ds.Close()
+		t.Cleanup(func() { _ = ds.Close() })
 
 		setupDatastore(ds, require)
 
@@ -470,6 +470,7 @@ func DeleteNotExistantTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -491,6 +492,7 @@ func DeleteAlreadyDeletedTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -526,6 +528,7 @@ func WriteDeleteWriteTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -553,6 +556,7 @@ func CreateAlreadyExistingTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -582,6 +586,7 @@ func TouchAlreadyExistingTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -612,6 +617,7 @@ func CreateDeleteTouchTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -641,6 +647,7 @@ func CreateTouchDeleteTouchTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -675,6 +682,7 @@ func TouchAlreadyExistingCaveatedTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -700,6 +708,7 @@ func MultipleReadsInRWTTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -729,6 +738,7 @@ func ConcurrentWriteSerializationTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()

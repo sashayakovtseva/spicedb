@@ -34,6 +34,7 @@ func RevisionQuantizationTest(t *testing.T, tester DatastoreTester) {
 
 			ds, err := tester.New(tc.quantizationRange, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
+			t.Cleanup(func() { _ = ds.Close() })
 
 			ctx := context.Background()
 			veryFirstRevision, err := ds.OptimizedRevision(ctx)
@@ -76,6 +77,7 @@ func RevisionSerializationTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -99,6 +101,7 @@ func RevisionGCTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, 10*time.Millisecond, 300*time.Millisecond, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -178,6 +181,7 @@ func SequentialRevisionsTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, 10*time.Second, 300*time.Minute, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -201,6 +205,7 @@ func ConcurrentRevisionsTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, 10*time.Second, 300*time.Minute, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

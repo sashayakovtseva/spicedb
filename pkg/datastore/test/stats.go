@@ -18,6 +18,7 @@ func StatsTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ds, _ = testfixtures.StandardDatastoreWithData(ds, require)
 

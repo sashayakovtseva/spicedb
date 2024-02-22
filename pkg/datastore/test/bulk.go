@@ -23,6 +23,7 @@ func BulkUploadTest(t *testing.T, tester DatastoreTester) {
 
 			rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
+			t.Cleanup(func() { _ = rawDS.Close() })
 
 			ds, _ := testfixtures.StandardDatastoreWithSchema(rawDS, require)
 			bulkSource := testfixtures.NewBulkTupleGenerator(
@@ -63,6 +64,7 @@ func BulkUploadErrorsTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithSchema(rawDS, require)
 

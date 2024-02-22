@@ -33,6 +33,7 @@ func RetryTest(t *testing.T, tester DatastoreTester) {
 
 			rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
+			t.Cleanup(func() { _ = rawDS.Close() })
 
 			ds := rawDS.(TestableDatastore)
 
