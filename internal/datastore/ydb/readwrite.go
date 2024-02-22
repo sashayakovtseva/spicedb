@@ -279,10 +279,10 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 		if len(dups) > 0 {
 			return 0, datastoreCommon.NewCreateRelationshipExistsError(dups[0])
 		}
-	}
 
-	if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
-		return 0, fmt.Errorf("failed to insert tuples: %w", err)
+		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
+			return 0, fmt.Errorf("failed to insert tuples: %w", err)
+		}
 	}
 
 	return uint64(len(insertionTuples)), nil
