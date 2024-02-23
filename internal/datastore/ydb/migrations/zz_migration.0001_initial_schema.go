@@ -66,8 +66,7 @@ CREATE TABLE caveat (
 	INDEX uq_caveat_living GLOBAL SYNC ON (deleted_at_unix_nano, name) COVER (definition)
 );`
 
-	// todo discuss JsonDocument instead of Json.
-	// todo check Ensure on insert, check indexed.
+	// todo use correct indexes.
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	createRelationTuple = `
 CREATE TABLE relation_tuple (
@@ -89,6 +88,37 @@ CREATE TABLE relation_tuple (
 	INDEX ix_gc_index GLOBAL SYNC ON (deleted_at_unix_nano)
 );`
 
+	// todo TOPIC_MIN_ACTIVE_PARTITIONS?
+	createNamespaceConfigChangefeed = `
+ALTER TABLE namespace_config
+ADD CHANGEFEED spicedb_watch 
+WITH (
+	FORMAT = 'JSON',
+	MODE = 'NEW_IMAGE',
+	RETENTION_PERIOD = Interval('PT1H'),
+	VIRTUAL_TIMESTAMPS = TRUE
+);`
+
+	createCaveatChangefeed = `
+ALTER TABLE caveat
+ADD CHANGEFEED spicedb_watch 
+WITH (
+	FORMAT = 'JSON',
+	MODE = 'NEW_IMAGE',
+	RETENTION_PERIOD = Interval('PT1H'),
+	VIRTUAL_TIMESTAMPS = TRUE
+);`
+
+	createRelationTupleChangefeed = `
+ALTER TABLE relation_tuple
+ADD CHANGEFEED spicedb_watch 
+WITH (
+	FORMAT = 'JSON',
+	MODE = 'NEW_IMAGE',
+	RETENTION_PERIOD = Interval('PT1H'),
+	VIRTUAL_TIMESTAMPS = TRUE
+);`
+
 	insertUniqueID = `INSERT INTO metadata (unique_id) VALUES (CAST(RandomUuid(1) as String));`
 )
 
@@ -101,6 +131,9 @@ func init() {
 				common.AddTablePrefix(createNamespaceConfig, client.opts.tablePathPrefix),
 				common.AddTablePrefix(createCaveat, client.opts.tablePathPrefix),
 				common.AddTablePrefix(createRelationTuple, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createNamespaceConfigChangefeed, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createCaveatChangefeed, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createRelationTupleChangefeed, client.opts.tablePathPrefix),
 			}
 			for _, stmt := range statements {
 				if err := s.ExecuteSchemeQuery(ctx, stmt); err != nil {

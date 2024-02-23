@@ -31,10 +31,9 @@ func init() {
 var (
 	_ datastore.Datastore = &ydbDatastore{}
 
-	yq = sq.StatementBuilder.PlaceholderFormat(sq.DollarP)
-
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 
+	yq     = sq.StatementBuilder.PlaceholderFormat(sq.DollarP)
 	tracer = otel.Tracer("spicedb/internal/datastore/ydb")
 )
 
@@ -58,7 +57,7 @@ type ydbDatastore struct {
 
 	originalDSN string
 
-	// isClosed used in HeadRevision only to pass datastore tests
+	// isClosed used in HeadRevision only to pass datastore tests.
 	isClosed atomic.Bool
 }
 
@@ -203,9 +202,4 @@ func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, erro
 
 	now := truetime.UnixNano()
 	return revisions.NewForTimestamp(now), nil
-}
-
-func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
-	// TODO implement me
-	panic("implement me")
 }

@@ -22,6 +22,8 @@ import (
 )
 
 const (
+	changefeedSpicedbWatch = "spicedb_watch"
+
 	// common
 	colCreatedAtUnixNano = "created_at_unix_nano"
 	colDeletedAtUnixNano = "deleted_at_unix_nano"
