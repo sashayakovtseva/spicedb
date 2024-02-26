@@ -7,7 +7,9 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/prometheus/client_golang/prometheus"
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
+	ydbPrometheus "github.com/ydb-platform/ydb-go-sdk-prometheus"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
@@ -74,6 +76,7 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		parsedDSN.OriginalDSN,
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydbOtel.WithTraces(),
+		ydbPrometheus.WithTraces(prometheus.DefaultRegisterer),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open YDB connectionn: %w", err)

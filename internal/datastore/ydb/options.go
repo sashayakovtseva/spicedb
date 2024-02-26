@@ -20,17 +20,12 @@ type ydbConfig struct {
 
 	bulkLoadBatchSize int
 
-	// todo find a way to use it
-	maxRetries uint8
-
-	gcEnabled             bool
-	enablePrometheusStats bool
+	gcEnabled bool
 }
 
 var defaultConfig = ydbConfig{
-	tablePathPrefix:             "",
-	watchBufferLength:           0,
-	watchBufferWriteTimeout:     0,
+	watchBufferLength:           128,
+	watchBufferWriteTimeout:     time.Second,
 	followerReadDelay:           0 * time.Second,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
@@ -38,9 +33,7 @@ var defaultConfig = ydbConfig{
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
 	bulkLoadBatchSize:           1000,
-	maxRetries:                  0,
 	gcEnabled:                   false,
-	enablePrometheusStats:       false,
 }
 
 // Option provides the facility to configure how clients within the YDB
@@ -116,4 +109,18 @@ func FollowerReadDelay(delay time.Duration) Option {
 // This value defaults to 1000.
 func BulkLoadBatchSize(limit int) Option {
 	return func(o *ydbConfig) { o.bulkLoadBatchSize = limit }
+}
+
+// WatchBufferLength is the number of entries that can be stored in the watch
+// buffer while awaiting read by the client.
+//
+// This value defaults to 128.
+func WatchBufferLength(watchBufferLength uint16) Option {
+	return func(o *ydbConfig) { o.watchBufferLength = watchBufferLength }
+}
+
+// WatchBufferWriteTimeout is the maximum timeout for writing to the watch buffer,
+// after which the caller to the watch will be disconnected.
+func WatchBufferWriteTimeout(watchBufferWriteTimeout time.Duration) Option {
+	return func(o *ydbConfig) { o.watchBufferWriteTimeout = watchBufferWriteTimeout }
 }
