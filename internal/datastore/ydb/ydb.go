@@ -150,7 +150,7 @@ func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, er
 }
 
 func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
-	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
+	return &datastore.Features{Watch: datastore.Feature{Enabled: false}}, nil
 }
 
 func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {
