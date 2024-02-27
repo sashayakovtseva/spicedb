@@ -3,6 +3,7 @@ package ydb
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +60,7 @@ type ydbDatastore struct {
 
 	originalDSN string
 
+	closeOnce sync.Once
 	// isClosed used in HeadRevision only to pass datastore tests.
 	isClosed atomic.Bool
 }
@@ -110,15 +112,20 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 }
 
 func (y *ydbDatastore) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
-	defer cancel()
-
-	if err := y.driver.Close(ctx); err != nil {
-		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
+	if y.isClosed.Load() {
+		return nil
 	}
 
-	y.isClosed.Store(true)
-	return nil
+	var err error
+	y.closeOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+		defer cancel()
+
+		err = y.driver.Close(ctx)
+		y.isClosed.Store(true)
+	})
+
+	return err
 }
 
 func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, error) {
