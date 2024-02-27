@@ -71,15 +71,17 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		config.tablePathPrefix = parsedDSN.TablePathPrefix
 	}
 
-	db, err := ydb.Open(
-		ctx,
-		parsedDSN.OriginalDSN,
+	ydbOpts := []ydb.Option{
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydbOtel.WithTraces(),
-		ydbPrometheus.WithTraces(prometheus.DefaultRegisterer),
-	)
+	}
+	if config.enablePrometheusStats {
+		ydbOpts = append(ydbOpts, ydbPrometheus.WithTraces(prometheus.DefaultRegisterer))
+	}
+
+	db, err := ydb.Open(ctx, parsedDSN.OriginalDSN, ydbOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open YDB connectionn: %w", err)
+		return nil, fmt.Errorf("failed to open YDB connection: %w", err)
 	}
 
 	if _, err := db.Scheme().ListDirectory(ctx, config.tablePathPrefix); err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/authzed/spicedb/internal/datastore/postgres"
 	"github.com/authzed/spicedb/internal/datastore/proxy"
 	"github.com/authzed/spicedb/internal/datastore/spanner"
+	"github.com/authzed/spicedb/internal/datastore/ydb"
 	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/datastore"
 	"github.com/authzed/spicedb/pkg/validationfile"
@@ -37,6 +38,7 @@ var BuilderForEngine = map[string]engineBuilderFunc{
 	MemoryEngine:    newMemoryDatstore,
 	SpannerEngine:   newSpannerDatastore,
 	MySQLEngine:     newMySQLDatastore,
+	ydb.Engine:      newYDBDatastore,
 }
 
 //go:generate go run github.com/ecordell/optgen -output zz_generated.connpool.options.go . ConnPoolConfig
@@ -119,17 +121,18 @@ type Config struct {
 	RequestHedgingMaxRequests      uint64        `debugmap:"visible"`
 	RequestHedgingQuantile         float64       `debugmap:"visible"`
 
+	// common (shared among two or more datastores)
+	FollowerReadDelay  time.Duration `debugmap:"visible"`
+	GCInterval         time.Duration `debugmap:"visible"`
+	GCMaxOperationTime time.Duration `debugmap:"visible"`
+	TablePrefix        string        `debugmap:"visible"`
+
 	// CRDB
-	FollowerReadDelay         time.Duration `debugmap:"visible"`
 	MaxRetries                int           `debugmap:"visible"`
 	OverlapKey                string        `debugmap:"visible"`
 	OverlapStrategy           string        `debugmap:"visible"`
 	EnableConnectionBalancing bool          `debugmap:"visible"`
 	ConnectRate               time.Duration `debugmap:"visible"`
-
-	// Postgres
-	GCInterval         time.Duration `debugmap:"visible"`
-	GCMaxOperationTime time.Duration `debugmap:"visible"`
 
 	// Spanner
 	SpannerCredentialsFile string `debugmap:"visible"`
@@ -137,8 +140,8 @@ type Config struct {
 	SpannerMinSessions     uint64 `debugmap:"visible"`
 	SpannerMaxSessions     uint64 `debugmap:"visible"`
 
-	// MySQL
-	TablePrefix string `debugmap:"visible"`
+	// YDB
+	YDBBulkLoadBatchSize int `debugmap:"visible"`
 
 	// Internal
 	WatchBufferLength       uint16        `debugmap:"visible"`
@@ -187,8 +190,8 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	var unusedSplitQueryCount uint16
 
 	flagSet.DurationVar(&opts.GCWindow, flagName("datastore-gc-window"), defaults.GCWindow, "amount of time before revisions are garbage collected")
-	flagSet.DurationVar(&opts.GCInterval, flagName("datastore-gc-interval"), defaults.GCInterval, "amount of time between passes of garbage collection (postgres driver only)")
-	flagSet.DurationVar(&opts.GCMaxOperationTime, flagName("datastore-gc-max-operation-time"), defaults.GCMaxOperationTime, "maximum amount of time a garbage collection pass can operate before timing out (postgres driver only)")
+	flagSet.DurationVar(&opts.GCInterval, flagName("datastore-gc-interval"), defaults.GCInterval, "amount of time between passes of garbage collection (postgres, mysql and ydb driver only)")
+	flagSet.DurationVar(&opts.GCMaxOperationTime, flagName("datastore-gc-max-operation-time"), defaults.GCMaxOperationTime, "maximum amount of time a garbage collection pass can operate before timing out (postgres, mysql and ydb driver only)")
 	flagSet.DurationVar(&opts.RevisionQuantization, flagName("datastore-revision-quantization-interval"), defaults.RevisionQuantization, "boundary interval to which to round the quantized revision")
 	flagSet.Float64Var(&opts.MaxRevisionStalenessPercent, flagName("datastore-revision-quantization-max-staleness-percent"), defaults.MaxRevisionStalenessPercent, "float percentage (where 1 = 100%) of the revision quantization interval where we may opt to select a stale revision for performance reasons. Defaults to 0.1 (representing 10%)")
 	flagSet.BoolVar(&opts.ReadOnly, flagName("datastore-readonly"), defaults.ReadOnly, "set the service to read-only mode")
@@ -201,8 +204,8 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	flagSet.Float64Var(&opts.RequestHedgingQuantile, flagName("datastore-request-hedging-quantile"), defaults.RequestHedgingQuantile, "quantile of historical datastore request time over which a request will be considered slow")
 	flagSet.BoolVar(&opts.EnableDatastoreMetrics, flagName("datastore-prometheus-metrics"), defaults.EnableDatastoreMetrics, "set to false to disabled prometheus metrics from the datastore")
 	// See crdb doc for info about follower reads and how it is configured: https://www.cockroachlabs.com/docs/stable/follower-reads.html
-	flagSet.DurationVar(&opts.FollowerReadDelay, flagName("datastore-follower-read-delay-duration"), 4_800*time.Millisecond, "amount of time to subtract from non-sync revision timestamps to ensure they are sufficiently in the past to enable follower reads (cockroach driver only)")
-	flagSet.IntVar(&opts.MaxRetries, flagName("datastore-max-tx-retries"), 10, "number of times a retriable transaction should be retried")
+	flagSet.DurationVar(&opts.FollowerReadDelay, flagName("datastore-follower-read-delay-duration"), defaults.FollowerReadDelay, "amount of time to subtract from non-sync revision timestamps to ensure they are sufficiently in the past to enable follower reads (cockroach and ydb driver only)")
+	flagSet.IntVar(&opts.MaxRetries, flagName("datastore-max-tx-retries"), defaults.MaxRetries, "number of times a retriable transaction should be retried (except ydb driver)")
 	flagSet.StringVar(&opts.OverlapStrategy, flagName("datastore-tx-overlap-strategy"), "static", `strategy to generate transaction overlap keys ("request", "prefix", "static", "insecure") (cockroach driver only - see https://spicedb.dev/d/crdb-overlap for details)"`)
 	flagSet.StringVar(&opts.OverlapKey, flagName("datastore-tx-overlap-key"), "key", "static key to touch when writing to ensure transactions overlap (only used if --datastore-tx-overlap-strategy=static is set; cockroach driver only)")
 	flagSet.BoolVar(&opts.EnableConnectionBalancing, flagName("datastore-connection-balancing"), defaults.EnableConnectionBalancing, "enable connection balancing between database nodes (cockroach driver only)")
@@ -211,10 +214,11 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	flagSet.StringVar(&opts.SpannerEmulatorHost, flagName("datastore-spanner-emulator-host"), "", "URI of spanner emulator instance used for development and testing (e.g. localhost:9010)")
 	flagSet.Uint64Var(&opts.SpannerMinSessions, flagName("datastore-spanner-min-sessions"), 100, "minimum number of sessions across all Spanner gRPC connections the client can have at a given time")
 	flagSet.Uint64Var(&opts.SpannerMaxSessions, flagName("datastore-spanner-max-sessions"), 400, "maximum number of sessions across all Spanner gRPC connections the client can have at a given time")
-	flagSet.StringVar(&opts.TablePrefix, flagName("datastore-mysql-table-prefix"), "", "prefix to add to the name of all SpiceDB database tables")
-	flagSet.StringVar(&opts.MigrationPhase, flagName("datastore-migration-phase"), "", "datastore-specific flag that should be used to signal to a datastore which phase of a multi-step migration it is in")
-	flagSet.Uint16Var(&opts.WatchBufferLength, flagName("datastore-watch-buffer-length"), 1024, "how large the watch buffer should be before blocking")
-	flagSet.DurationVar(&opts.WatchBufferWriteTimeout, flagName("datastore-watch-buffer-write-timeout"), 1*time.Second, "how long the watch buffer should queue before forcefully disconnecting the reader")
+	flagSet.StringVar(&opts.TablePrefix, flagName("datastore-mysql-table-prefix"), defaults.TablePrefix, "prefix to add to the name of all SpiceDB database tables (mysql and ydb driver only)")
+	flagSet.StringVar(&opts.MigrationPhase, flagName("datastore-migration-phase"), "", "datastore-specific flag that should be used to signal to a datastore which phase of a multi-step migration it is in (postgres and spanner driver only)")
+	flagSet.Uint16Var(&opts.WatchBufferLength, flagName("datastore-watch-buffer-length"), defaults.WatchBufferLength, "how large the watch buffer should be before blocking")
+	flagSet.DurationVar(&opts.WatchBufferWriteTimeout, flagName("datastore-watch-buffer-write-timeout"), defaults.WatchBufferWriteTimeout, "how long the watch buffer should queue before forcefully disconnecting the reader")
+	flagSet.IntVar(&opts.YDBBulkLoadBatchSize, flagName("datastore-bulk-load-size"), defaults.YDBBulkLoadBatchSize, "number of rows BulkLoad will process in a single batch (ydb driver only)")
 
 	// disabling stats is only for tests
 	flagSet.BoolVar(&opts.DisableStats, flagName("datastore-disable-stats"), false, "disable recording relationship counts to the stats table")
@@ -238,6 +242,7 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 func DefaultDatastoreConfig() *Config {
 	return &Config{
 		Engine:                         MemoryEngine,
+		URI:                            "",
 		GCWindow:                       24 * time.Hour,
 		LegacyFuzzing:                  -1,
 		RevisionQuantization:           5 * time.Second,
@@ -245,31 +250,33 @@ func DefaultDatastoreConfig() *Config {
 		ReadConnPool:                   *DefaultReadConnPool(),
 		WriteConnPool:                  *DefaultWriteConnPool(),
 		ReadOnly:                       false,
-		MaxRetries:                     10,
-		OverlapKey:                     "key",
-		OverlapStrategy:                "static",
-		ConnectRate:                    100 * time.Millisecond,
-		EnableConnectionBalancing:      true,
-		GCInterval:                     3 * time.Minute,
-		GCMaxOperationTime:             1 * time.Minute,
-		WatchBufferLength:              1024,
-		WatchBufferWriteTimeout:        1 * time.Second,
 		EnableDatastoreMetrics:         true,
 		DisableStats:                   false,
 		BootstrapFiles:                 []string{},
-		BootstrapTimeout:               10 * time.Second,
+		BootstrapFileContents:          nil,
 		BootstrapOverwrite:             false,
+		BootstrapTimeout:               10 * time.Second,
 		RequestHedgingEnabled:          false,
 		RequestHedgingInitialSlowValue: 10000000,
 		RequestHedgingMaxRequests:      1_000_000,
 		RequestHedgingQuantile:         0.95,
+		FollowerReadDelay:              4_800 * time.Millisecond,
+		GCInterval:                     3 * time.Minute,
+		GCMaxOperationTime:             1 * time.Minute,
+		TablePrefix:                    "",
+		MaxRetries:                     10,
+		OverlapKey:                     "key",
+		OverlapStrategy:                "static",
+		EnableConnectionBalancing:      true,
+		ConnectRate:                    100 * time.Millisecond,
 		SpannerCredentialsFile:         "",
 		SpannerEmulatorHost:            "",
-		TablePrefix:                    "",
-		MigrationPhase:                 "",
-		FollowerReadDelay:              4_800 * time.Millisecond,
 		SpannerMinSessions:             100,
 		SpannerMaxSessions:             400,
+		YDBBulkLoadBatchSize:           1000,
+		WatchBufferLength:              1024,
+		WatchBufferWriteTimeout:        1 * time.Second,
+		MigrationPhase:                 "",
 	}
 }
 
@@ -416,6 +423,24 @@ func newPostgresDatastore(ctx context.Context, opts Config) (datastore.Datastore
 		postgres.MigrationPhase(opts.MigrationPhase),
 	}
 	return postgres.NewPostgresDatastore(ctx, opts.URI, pgOpts...)
+}
+
+func newYDBDatastore(ctx context.Context, config Config) (datastore.Datastore, error) {
+	opts := []ydb.Option{
+		ydb.GCWindow(config.GCWindow),
+		ydb.GCEnabled(!config.ReadOnly),
+		ydb.RevisionQuantization(config.RevisionQuantization),
+		ydb.MaxRevisionStalenessPercent(config.MaxRevisionStalenessPercent),
+		ydb.FollowerReadDelay(config.FollowerReadDelay),
+		ydb.GCInterval(config.GCInterval),
+		ydb.GCMaxOperationTime(config.GCMaxOperationTime),
+		ydb.WithTablePathPrefix(config.TablePrefix),
+		ydb.WatchBufferLength(config.WatchBufferLength),
+		ydb.WatchBufferWriteTimeout(config.WatchBufferWriteTimeout),
+		ydb.BulkLoadBatchSize(config.YDBBulkLoadBatchSize),
+		ydb.WithEnablePrometheusStats(config.EnableDatastoreMetrics),
+	}
+	return ydb.NewYDBDatastore(ctx, config.URI, opts...)
 }
 
 func newSpannerDatastore(ctx context.Context, opts Config) (datastore.Datastore, error) {
