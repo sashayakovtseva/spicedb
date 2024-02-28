@@ -54,7 +54,6 @@ func (y *ydbDatastore) Watch(
 type cdcEvent struct {
 	Key      []string
 	NewImage json.RawMessage
-	Ts       []int
 }
 
 type namespaceConfigImage struct {

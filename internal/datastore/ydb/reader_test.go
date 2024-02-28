@@ -1,3 +1,5 @@
+//go:build ci && docker
+
 package ydb
 
 import (
@@ -477,7 +479,6 @@ func TestYDBReaderRelationships(t *testing.T) {
 		t.Cleanup(func() { yDS.Close() })
 
 		err = yDS.driver.Table().Do(context.Background(), func(ctx context.Context, s table.Session) error {
-
 			stmt, err := s.Prepare(
 				ctx,
 				common.AddTablePrefix(`
@@ -570,7 +571,6 @@ func TestYDBReaderRelationships(t *testing.T) {
 		}
 
 		require.Equal(t, lo.FromPtr(expect.caveatContext), actualCaveatContext)
-
 	}
 
 	testQueryRelationships := func(

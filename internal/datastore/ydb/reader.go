@@ -215,7 +215,6 @@ func (r *ydbReader) LookupNamespacesWithNames(
 				builder = builder.View(ixUqNamespaceLiving)
 			}
 			return builder
-
 		},
 	)
 	if err != nil {
