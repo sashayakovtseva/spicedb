@@ -167,7 +167,7 @@ func queryRow(
 		return err
 	}
 	if !res.NextRow() {
-		return fmt.Errorf("no unique id rows")
+		return fmt.Errorf("no rows in result set")
 	}
 	if err := res.Scan(values...); err != nil {
 		return err
