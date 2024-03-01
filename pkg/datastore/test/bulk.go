@@ -6,14 +6,18 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/authzed/spicedb/internal/testfixtures"
 	"github.com/authzed/spicedb/pkg/datastore"
+	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
 func BulkUploadTest(t *testing.T, tester DatastoreTester) {
+	const ydbSelectLimit = 1000
+
 	testCases := []int{0, 1, 10, 100, 1_000, 10_000}
 
 	for _, tc := range testCases {
@@ -23,6 +27,7 @@ func BulkUploadTest(t *testing.T, tester DatastoreTester) {
 
 			rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
+			t.Cleanup(func() { _ = rawDS.Close() })
 
 			ds, _ := testfixtures.StandardDatastoreWithSchema(rawDS, require)
 			bulkSource := testfixtures.NewBulkTupleGenerator(
@@ -46,13 +51,39 @@ func BulkUploadTest(t *testing.T, tester DatastoreTester) {
 			head, err := ds.HeadRevision(ctx)
 			require.NoError(err)
 
-			iter, err := ds.SnapshotReader(head).QueryRelationships(ctx, datastore.RelationshipsFilter{
-				ResourceType: testfixtures.DocumentNS.Name,
-			})
-			require.NoError(err)
-			defer iter.Close()
+			var (
+				after       *core.RelationTuple
+				isLastCheck bool
+			)
+			for left := tc; !isLastCheck; {
+				if left == 0 {
+					isLastCheck = true
+				}
 
-			tRequire.VerifyIteratorCount(iter, tc)
+				iter, err := ds.SnapshotReader(head).QueryRelationships(ctx, datastore.RelationshipsFilter{
+					ResourceType: testfixtures.DocumentNS.Name,
+				},
+					options.WithLimit(lo.ToPtr(uint64(ydbSelectLimit))),
+					options.WithSort(options.ByResource),
+					options.WithAfter(after),
+				)
+				require.NoError(err)
+
+				expect := ydbSelectLimit
+				if left < ydbSelectLimit {
+					expect = left
+				}
+
+				tRequire.VerifyIteratorCount(iter, expect)
+
+				if expect > 0 {
+					after, err = iter.Cursor()
+					require.NoError(err)
+				}
+
+				iter.Close()
+				left -= expect
+			}
 		})
 	}
 }
@@ -63,6 +94,7 @@ func BulkUploadErrorsTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, _ := testfixtures.StandardDatastoreWithSchema(rawDS, require)
 
