@@ -35,8 +35,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestYDBDatastore(t *testing.T) {
-	t.Skip("unimplemented datastore")
-
 	test.AllWithExceptions(t,
 		test.DatastoreTesterFunc(func(
 			revisionQuantization time.Duration,
