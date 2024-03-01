@@ -6,12 +6,19 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	v1 "github.com/authzed/authzed-go/proto/authzed/api/v1"
+	"github.com/jzelinskie/stringz"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
+	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
+	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
+	"github.com/authzed/spicedb/pkg/spiceerrors"
+	"github.com/authzed/spicedb/pkg/tuple"
 )
 
 type ydbReadWriter struct {
@@ -31,6 +38,7 @@ func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.Cavea
 		deleteCaveatBuilder,
 		colName,
 		caveats,
+		true,
 	)
 }
 
@@ -47,14 +55,149 @@ func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) erro
 	)
 }
 
+// WriteRelationships takes a list of tuple mutations and applies them to the datastore.
 func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
-	// TODO implement me
-	panic("implement me")
+	insertBuilder := insertRelationsBuilder
+	deleteBuilder := deleteRelationBuilder
+
+	var (
+		err             error
+		insertionTuples []*core.RelationTuple
+		touchTuples     []*core.RelationTuple
+
+		deleteClauses sq.Or
+	)
+
+	// Parse the updates, building inserts for CREATE/TOUCH and deletes for DELETE.
+	for _, mut := range mutations {
+		tpl := mut.GetTuple()
+
+		switch mut.GetOperation() {
+		case core.RelationTupleUpdate_CREATE:
+			insertionTuples = append(insertionTuples, tpl)
+			insertBuilder, err = appendForInsertion(insertBuilder, tpl, rw.newRevision)
+			if err != nil {
+				return fmt.Errorf("failed to append tuple for insertion: %w", err)
+			}
+
+		case core.RelationTupleUpdate_TOUCH:
+			touchTuples = append(touchTuples, tpl)
+
+		case core.RelationTupleUpdate_DELETE:
+			deleteClauses = append(deleteClauses, exactRelationshipClause(tpl))
+
+		default:
+			return spiceerrors.MustBugf("unknown tuple mutation: %v", mut)
+		}
+	}
+
+	// Perform SELECT queries first as a part of uniqueness check.
+	if len(insertionTuples) > 0 {
+		dups, err := rw.selectTuples(ctx, insertionTuples)
+		if err != nil {
+			return fmt.Errorf("failed to ensure CREATE tuples uniqueness: %w", err)
+		}
+		if len(dups) > 0 {
+			return datastoreCommon.NewCreateRelationshipExistsError(dups[0])
+		}
+	}
+	if len(touchTuples) > 0 {
+		dups, err := rw.selectTuples(ctx, touchTuples)
+		if err != nil {
+			return fmt.Errorf("failed to ensure TOUCH tuples uniqueness: %w", err)
+		}
+
+		duplicatePKToRel := make(map[string]*core.RelationTuple, len(dups))
+		for i := range dups {
+			duplicatePKToRel[tuple.StringWithoutCaveat(dups[i])] = dups[i]
+		}
+
+		for i := 0; i < len(touchTuples); {
+			pk := tuple.StringWithoutCaveat(touchTuples[i])
+			dup, ok := duplicatePKToRel[pk]
+			if !ok {
+				insertBuilder, err = appendForInsertion(insertBuilder, touchTuples[i], rw.newRevision)
+				if err != nil {
+					return fmt.Errorf("failed to append tuple for insertion: %w", err)
+				}
+				i++
+				continue
+			}
+
+			if tuple.Equal(touchTuples[i], dup) {
+				touchTuples[i], touchTuples[len(touchTuples)-1] = touchTuples[len(touchTuples)-1], touchTuples[i]
+				touchTuples = touchTuples[:len(touchTuples)-1]
+				continue
+			}
+
+			deleteClauses = append(deleteClauses, exactRelationshipClause(dup))
+			insertBuilder, err = appendForInsertion(insertBuilder, touchTuples[i], rw.newRevision)
+			if err != nil {
+				return fmt.Errorf("failed to append tuple for insertion: %w", err)
+			}
+			i++
+		}
+	}
+
+	// Run DELETE updates, if any.
+	if len(deleteClauses) > 0 {
+		if err := executeDeleteQuery(
+			ctx,
+			rw.tablePathPrefix,
+			rw.executor,
+			deleteBuilder,
+			rw.newRevision,
+			deleteClauses,
+		); err != nil {
+			return fmt.Errorf("failed to delete tuples: %w", err)
+		}
+	}
+
+	// Run CREATE and TOUCH insertions, if any.
+	if len(insertionTuples) > 0 || len(touchTuples) > 0 {
+		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
+			return fmt.Errorf("failed to insert tuples: %w", err)
+		}
+	}
+
+	return nil
 }
 
+// DeleteRelationships deletes all Relationships that match the provided filter.
 func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.RelationshipFilter) error {
-	// TODO implement me
-	panic("implement me")
+	pred := sq.Eq{
+		colNamespace: filter.GetResourceType(),
+	}
+
+	if filter.GetOptionalResourceId() != "" {
+		pred[colObjectID] = filter.GetOptionalResourceId()
+	}
+	if filter.GetOptionalRelation() != "" {
+		pred[colRelation] = filter.GetOptionalRelation()
+	}
+
+	if subjectFilter := filter.GetOptionalSubjectFilter(); subjectFilter != nil {
+		pred[colUsersetNamespace] = subjectFilter.GetSubjectType()
+		if subjectFilter.GetOptionalSubjectId() != "" {
+			pred[colUsersetObjectID] = subjectFilter.GetOptionalSubjectId()
+		}
+		if relationFilter := subjectFilter.GetOptionalRelation(); relationFilter != nil {
+			pred[colUsersetRelation] = stringz.DefaultEmpty(relationFilter.GetRelation(), datastore.Ellipsis)
+		}
+	}
+
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteRelationBuilder,
+		rw.newRevision,
+		pred,
+	); err != nil {
+		return fmt.Errorf("failed to delete relations: %w", err)
+	}
+
+	return nil
 }
 
 // WriteNamespaces takes proto namespace definitions and persists them.
@@ -68,6 +211,7 @@ func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, namespaces ...*cor
 		deleteNamespaceBuilder,
 		colNamespace,
 		namespaces,
+		false,
 	)
 }
 
@@ -102,9 +246,33 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 	panic("implement me")
 }
 
+func (rw *ydbReadWriter) selectTuples(
+	ctx context.Context,
+	in []*core.RelationTuple,
+) ([]*core.RelationTuple, error) {
+	span := trace.SpanFromContext(ctx)
+
+	if len(in) == 0 {
+		return nil, nil
+	}
+
+	var pred sq.Or
+	for _, r := range in {
+		pred = append(pred, exactRelationshipClause(r))
+	}
+
+	sql, args, err := rw.modifier(readRelationBuilder).View(ixUqRelationLiving).Where(pred).ToYQL()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	return queryTuples(ctx, rw.tablePathPrefix, sql, table.NewQueryParameters(args...), span, rw.executor)
+}
+
 type coreDefinition interface {
 	MarshalVT() ([]byte, error)
 	GetName() string
+	proto.Message
 }
 
 // writeDefinitions is a generic func to upsert caveats or namespaces.
@@ -117,20 +285,32 @@ func writeDefinitions[T coreDefinition](
 	d sq.UpdateBuilder,
 	colName string,
 	defs []T,
+	useVT bool,
 ) error {
 	if len(defs) == 0 {
 		return nil
 	}
 
+	// hack b/c namespace and caveat use different marshal method
+	var marshaler func(def coreDefinition) ([]byte, error)
+	if useVT {
+		marshaler = func(def coreDefinition) ([]byte, error) {
+			return def.MarshalVT()
+		}
+	} else {
+		marshaler = func(def coreDefinition) ([]byte, error) {
+			return proto.Marshal(def)
+		}
+	}
+
 	names := make([]string, 0, len(defs))
 	for _, def := range defs {
-		definitionBytes, err := def.MarshalVT()
+		definitionBytes, err := marshaler(def)
 		if err != nil {
 			return fmt.Errorf("failed to marshal definition: %w", err)
 		}
 
-		valuesToWrite := []any{def.GetName(), definitionBytes, writeRev.TimestampNanoSec()}
-		b = b.Values(valuesToWrite...)
+		b = b.Values(def.GetName(), definitionBytes, writeRev.TimestampNanoSec())
 		names = append(names, def.GetName())
 	}
 
@@ -146,7 +326,7 @@ func writeDefinitions[T coreDefinition](
 		return fmt.Errorf("failed to delete existing definitions: %w", err)
 	}
 
-	sql, args, err := b.ToYdbSql()
+	sql, args, err := b.ToYQL()
 	if err != nil {
 		return fmt.Errorf("failed to build insert definitions query: %w", err)
 	}
@@ -159,4 +339,46 @@ func writeDefinitions[T coreDefinition](
 	defer res.Close()
 
 	return nil
+}
+
+func appendForInsertion(
+	b sq.InsertBuilder,
+	t *core.RelationTuple,
+	rev revisions.TimestampRevision,
+) (sq.InsertBuilder, error) {
+	var caveatName *string
+	var caveatContext *[]byte
+	if t.GetCaveat() != nil {
+		caveatName = &t.GetCaveat().CaveatName
+		cc, err := t.GetCaveat().GetContext().MarshalJSON()
+		if err != nil {
+			return b, err
+		}
+		caveatContext = &cc
+	}
+
+	valuesToWrite := []interface{}{
+		t.GetResourceAndRelation().GetNamespace(),
+		t.GetResourceAndRelation().GetObjectId(),
+		t.GetResourceAndRelation().GetRelation(),
+		t.GetSubject().GetNamespace(),
+		t.GetSubject().GetObjectId(),
+		t.GetSubject().GetRelation(),
+		caveatName,
+		types.NullableJSONDocumentValueFromBytes(caveatContext),
+		rev.TimestampNanoSec(),
+	}
+
+	return b.Values(valuesToWrite...), nil
+}
+
+func exactRelationshipClause(r *core.RelationTuple) sq.Eq {
+	return sq.Eq{
+		colNamespace:        r.GetResourceAndRelation().GetNamespace(),
+		colObjectID:         r.GetResourceAndRelation().GetObjectId(),
+		colRelation:         r.GetResourceAndRelation().GetRelation(),
+		colUsersetNamespace: r.GetSubject().GetNamespace(),
+		colUsersetObjectID:  r.GetSubject().GetObjectId(),
+		colUsersetRelation:  r.GetSubject().GetRelation(),
+	}
 }

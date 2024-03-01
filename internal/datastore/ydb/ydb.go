@@ -3,8 +3,10 @@ package ydb
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
@@ -28,6 +30,8 @@ func init() {
 
 var (
 	_ datastore.Datastore = &ydbDatastore{}
+
+	yq = sq.StatementBuilder.PlaceholderFormat(sq.DollarP)
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 
@@ -53,6 +57,9 @@ type ydbDatastore struct {
 	config *ydbConfig
 
 	originalDSN string
+
+	// isClosed used in HeadRevision only to pass datastore tests
+	isClosed atomic.Bool
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
@@ -102,6 +109,7 @@ func (y *ydbDatastore) Close() error {
 		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
 	}
 
+	y.isClosed.Store(true)
 	return nil
 }
 
@@ -150,18 +158,8 @@ func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Rea
 	)
 }
 
-// ReadWriteTx starts a read/write transaction, which will be committed if no error is
-// returned and rolled back if an error is returned.
-// Important note from YDB docs:
-//
-//	All changes made during the transaction accumulate in the database server memory
-//	and are applied when the transaction completes. If the locks are not invalidated,
-//	all the changes accumulated are committed atomically; if at least one lock is
-//	invalidated, none of the changes committed. The above model involves certain
-//	restrictions: changes made by a single transaction must fit inside available
-//	memory, and a transaction "doesn't see" its changes.
-//
-// todo verify all ReadWriteTx usages order reads before writes.
+// ReadWriteTx starts a read/write transaction, which will be committed if
+// no error is returned and rolled back if an error is returned.
 func (y *ydbDatastore) ReadWriteTx(
 	ctx context.Context,
 	fn datastore.TxUserFunc,
@@ -198,6 +196,10 @@ func (y *ydbDatastore) ReadWriteTx(
 }
 
 func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, error) {
+	if y.isClosed.Load() {
+		return datastore.NoRevision, fmt.Errorf("datastore is closed")
+	}
+
 	now := truetime.UnixNano()
 	return revisions.NewForTimestamp(now), nil
 }
