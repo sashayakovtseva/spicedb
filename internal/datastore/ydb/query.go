@@ -146,6 +146,22 @@ func (se sessionQueryExecutor) Execute(
 	return res, err
 }
 
+// txQueryExecutor implements queryExecutor for YDB transactional actor.
+// This is a convenient wrapper to add custom options for all queries.
+type txQueryExecutor struct {
+	tx table.TransactionActor
+}
+
+func (t txQueryExecutor) Execute(
+	ctx context.Context,
+	query string,
+	params *table.QueryParameters,
+	opts ...options.ExecuteDataQueryOption,
+) (result.Result, error) {
+	opts = append(opts, options.WithKeepInCache(true))
+	return t.tx.Execute(ctx, query, params, opts...)
+}
+
 func queryRow(
 	ctx context.Context,
 	executor queryExecutor,
