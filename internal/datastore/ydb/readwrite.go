@@ -22,48 +22,29 @@ type ydbReadWriter struct {
 // WriteCaveats stores the provided caveats.
 // Currently living caveats with the same names are silently marked as deleted (table range scan operation).
 func (rw *ydbReadWriter) WriteCaveats(ctx context.Context, caveats []*core.CaveatDefinition) error {
-	if len(caveats) == 0 {
-		return nil
-	}
-
-	b := insertCaveatBuilder
-	caveatNames := make([]string, 0, len(caveats))
-	for _, caveat := range caveats {
-		definitionBytes, err := caveat.MarshalVT()
-		if err != nil {
-			return fmt.Errorf("failed to marshal caveat definition: %w", err)
-		}
-
-		valuesToWrite := []any{caveat.Name, definitionBytes, rw.newRevision.TimestampNanoSec()}
-		b = b.Values(valuesToWrite...)
-		caveatNames = append(caveatNames, caveat.Name)
-	}
-
-	if err := rw.deleteCaveatsByNames(ctx, caveatNames); err != nil {
-		return fmt.Errorf("failed to delete existing caveats: %w", err)
-	}
-
-	// todo add select ensure?
-
-	sql, args, err := b.ToYdbSql()
-	if err != nil {
-		return fmt.Errorf("failed to build insert caveats query: %w", err)
-	}
-
-	sql = ydbCommon.AddTablePrefix(sql, rw.tablePathPrefix)
-	res, err := rw.executor.Execute(ctx, sql, table.NewQueryParameters(args...))
-	if err != nil {
-		return fmt.Errorf("failed to insert caveats: %w", err)
-	}
-	defer res.Close()
-
-	return nil
+	return writeDefinitions[*core.CaveatDefinition](
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		rw.newRevision,
+		insertCaveatBuilder,
+		deleteCaveatBuilder,
+		colName,
+		caveats,
+	)
 }
 
 // DeleteCaveats deletes the provided caveats by name.
 // This is a table range scan operation.
 func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) error {
-	return rw.deleteCaveatsByNames(ctx, names)
+	return executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteCaveatBuilder,
+		rw.newRevision,
+		sq.Eq{colName: names},
+	)
 }
 
 func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
@@ -76,14 +57,44 @@ func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.Rel
 	panic("implement me")
 }
 
-func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, newConfigs ...*core.NamespaceDefinition) error {
-	// TODO implement me
-	panic("implement me")
+// WriteNamespaces takes proto namespace definitions and persists them.
+func (rw *ydbReadWriter) WriteNamespaces(ctx context.Context, namespaces ...*core.NamespaceDefinition) error {
+	return writeDefinitions[*core.NamespaceDefinition](
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		rw.newRevision,
+		insertNamespaceBuilder,
+		deleteNamespaceBuilder,
+		colNamespace,
+		namespaces,
+	)
 }
 
-func (rw *ydbReadWriter) DeleteNamespaces(ctx context.Context, nsNames ...string) error {
-	// TODO implement me
-	panic("implement me")
+// DeleteNamespaces deletes namespaces including associated relationships.
+func (rw *ydbReadWriter) DeleteNamespaces(ctx context.Context, names ...string) error {
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteNamespaceBuilder,
+		rw.newRevision,
+		sq.Eq{colNamespace: names},
+	); err != nil {
+		return fmt.Errorf("failed to delete namespaces: %w", err)
+	}
+
+	if err := executeDeleteQuery(
+		ctx,
+		rw.tablePathPrefix,
+		rw.executor,
+		deleteRelationBuilder,
+		rw.newRevision,
+		sq.Eq{colNamespace: names},
+	); err != nil {
+		return fmt.Errorf("failed to delete namespace relations: %w", err)
+	}
+	return nil
 }
 
 func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteRelationshipSource) (uint64, error) {
@@ -91,19 +102,59 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 	panic("implement me")
 }
 
-func (rw *ydbReadWriter) deleteCaveatsByNames(ctx context.Context, names []string) error {
-	sql, args, err := deleteCaveatBuilder.
-		Set(colDeletedAtUnixNano, rw.newRevision.TimestampNanoSec()).
-		Where(sq.Eq{colName: names}).
-		ToYdbSql()
-	if err != nil {
-		return fmt.Errorf("failed to build delete caveats query: %w", err)
+type coreDefinition interface {
+	MarshalVT() ([]byte, error)
+	GetName() string
+}
+
+// writeDefinitions is a generic func to upsert caveats or namespaces.
+func writeDefinitions[T coreDefinition](
+	ctx context.Context,
+	tablePathPrefix string,
+	executor queryExecutor,
+	writeRev revisions.TimestampRevision,
+	b sq.InsertBuilder,
+	d sq.UpdateBuilder,
+	colName string,
+	defs []T,
+) error {
+	if len(defs) == 0 {
+		return nil
 	}
 
-	sql = ydbCommon.AddTablePrefix(sql, rw.tablePathPrefix)
-	res, err := rw.executor.Execute(ctx, sql, table.NewQueryParameters(args...))
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		definitionBytes, err := def.MarshalVT()
+		if err != nil {
+			return fmt.Errorf("failed to marshal definition: %w", err)
+		}
+
+		valuesToWrite := []any{def.GetName(), definitionBytes, writeRev.TimestampNanoSec()}
+		b = b.Values(valuesToWrite...)
+		names = append(names, def.GetName())
+	}
+
+	// note: there's no need in select ensure with this removal.
+	if err := executeDeleteQuery(
+		ctx,
+		tablePathPrefix,
+		executor,
+		d,
+		writeRev,
+		sq.Eq{colName: names},
+	); err != nil {
+		return fmt.Errorf("failed to delete existing definitions: %w", err)
+	}
+
+	sql, args, err := b.ToYdbSql()
 	if err != nil {
-		return fmt.Errorf("failed to delete caveats: %w", err)
+		return fmt.Errorf("failed to build insert definitions query: %w", err)
+	}
+
+	sql = ydbCommon.AddTablePrefix(sql, tablePathPrefix)
+	res, err := executor.Execute(ctx, sql, table.NewQueryParameters(args...))
+	if err != nil {
+		return fmt.Errorf("failed to insert definitions: %w", err)
 	}
 	defer res.Close()
 
