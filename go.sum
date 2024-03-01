@@ -787,8 +787,8 @@ github.com/sashamelentyev/interfacebloat v1.1.0 h1:xdRdJp0irL086OyW1H/RTZTr1h/tM
 github.com/sashamelentyev/interfacebloat v1.1.0/go.mod h1:+Y9yU5YdTkrNvoX0xHc84dxiN1iBi9+G8zZIhPVoNjQ=
 github.com/sashamelentyev/usestdlibvars v1.24.0 h1:MKNzmXtGh5N0y74Z/CIaJh4GlB364l0K1RUT08WSWAc=
 github.com/sashamelentyev/usestdlibvars v1.24.0/go.mod h1:9cYkq+gYJ+a5W2RPdhfaSCnTVUC1OQP/bSiiBhq3OZE=
-github.com/sashayakovtseva/ydb-go-qb/yqb v0.0.0-20240213140040-54bb6e2c3d4e h1:K+TDVtzxAWsoZIgv80k6WwJRUlwy/E52WIx11KXXMoc=
-github.com/sashayakovtseva/ydb-go-qb/yqb v0.0.0-20240213140040-54bb6e2c3d4e/go.mod h1:/BQxZllbB+32I1wMFKyt48T1NVvZy/tekhPSIk6DjNs=
+github.com/sashayakovtseva/squirrel v0.0.0-20240221090639-dbbe544fdbac h1:+5ONyjov+Y71BHvfM+bieYkRaq3kou/fbN2eZP5HTys=
+github.com/sashayakovtseva/squirrel v0.0.0-20240221090639-dbbe544fdbac/go.mod h1:qX4S2xopS/Y7qxwEDxvbkZSqNDSOPMbw1gfcSme7m5Q=
 github.com/schollz/progressbar/v3 v3.14.1 h1:VD+MJPCr4s3wdhTc7OEJ/Z3dAeBzJ7yKH/P4lC5yRTI=
 github.com/schollz/progressbar/v3 v3.14.1/go.mod h1:Zc9xXneTzWXF81TGoqL71u0sBPjULtEHYtj/WVgVy8E=
 github.com/scylladb/go-set v1.0.2 h1:SkvlMCKhP0wyyct6j+0IHJkBkSZL+TDzZ4E7f7BCcRE=

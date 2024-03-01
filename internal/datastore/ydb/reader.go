@@ -261,7 +261,7 @@ func loadAllNamespaces(
 	executor queryExecutor,
 	modifier queryModifier,
 ) ([]datastore.RevisionedNamespace, error) {
-	sql, args, err := modifier(readNamespaceBuilder).ToYdbSql()
+	sql, args, err := modifier(readNamespaceBuilder).ToYQL()
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func loadAllCaveats(
 	executor queryExecutor,
 	modifier queryModifier,
 ) ([]datastore.RevisionedCaveat, error) {
-	sql, args, err := modifier(readCaveatBuilder).ToYdbSql()
+	sql, args, err := modifier(readCaveatBuilder).ToYQL()
 	if err != nil {
 		return nil, err
 	}
