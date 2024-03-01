@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel"
 
 	datastoreinternal "github.com/authzed/spicedb/internal/datastore"
-	datastoreCommon "github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	"github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/internal/datastore/ydb/migrations"
@@ -28,8 +27,7 @@ func init() {
 }
 
 var (
-	_ datastore.Datastore              = &ydbDatastore{}
-	_ datastoreCommon.GarbageCollector = &ydbDatastore{}
+	_ datastore.Datastore = &ydbDatastore{}
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 
@@ -178,7 +176,6 @@ func (y *ydbDatastore) ReadWriteTx(
 		txOptions = append(txOptions, table.WithIdempotent())
 	}
 
-	// todo use maxRetries somehow.
 	var newRev revisions.TimestampRevision
 	err := y.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
 		// this is actually a BAD way to do mvcc which may lead to new enemy problem.

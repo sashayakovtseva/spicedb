@@ -33,8 +33,8 @@ var defaultConfig = ydbConfig{
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
 	gcWindow:                    24 * time.Hour,
-	gcInterval:                  0,
-	gcMaxOperationTime:          0,
+	gcInterval:                  3 * time.Minute,
+	gcMaxOperationTime:          time.Minute,
 	maxRetries:                  0,
 	gcEnabled:                   false,
 	enablePrometheusStats:       false,
@@ -70,6 +70,20 @@ func GCWindow(window time.Duration) Option {
 	return func(o *ydbConfig) { o.gcWindow = window }
 }
 
+// GCInterval is the interval at which garbage collection will occur.
+//
+// This value defaults to 3 minutes.
+func GCInterval(interval time.Duration) Option {
+	return func(o *ydbConfig) { o.gcInterval = interval }
+}
+
+// GCMaxOperationTime is the maximum operation time of a garbage collection pass before it times out.
+//
+// This value defaults to 1 minute.
+func GCMaxOperationTime(time time.Duration) Option {
+	return func(o *ydbConfig) { o.gcMaxOperationTime = time }
+}
+
 // RevisionQuantization is the time bucket size to which advertised revisions
 // will be rounded.
 //
@@ -87,7 +101,7 @@ func MaxRevisionStalenessPercent(stalenessPercent float64) Option {
 	return func(o *ydbConfig) { o.maxRevisionStalenessPercent = stalenessPercent }
 }
 
-// FollowerReadDelay is the time delay to apply to enable historial reads.
+// FollowerReadDelay is the time delay to apply to enable historical reads.
 //
 // This value defaults to 5 seconds.
 func FollowerReadDelay(delay time.Duration) Option {

@@ -36,22 +36,25 @@ CREATE TABLE metadata (
 	PRIMARY KEY (unique_id)
 );`
 
-	// todo check namespace name with Ensure in insert.
 	// todo AUTO_PARTITIONING_BY_LOAD?
+	// ideally PK should be (namespace, deleted_at_unix_nano), but since deleted_at_unix_nano is
+	// updated during delete operation it cannot be used. simply (namespace) is also not applicable
+	// b/c there might be deleted namespaces with the same name as currently living.
+	// uq_namespace_living columns order is determined by list namespaces queries.
 	createNamespaceConfig = `
 CREATE TABLE namespace_config (
 	namespace Utf8 NOT NULL,
 	serialized_config String NOT NULL,
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
-	PRIMARY KEY (namespace, created_at_unix_nano, deleted_at_unix_nano),
-	INDEX uq_namespace_living GLOBAL SYNC ON (namespace, deleted_at_unix_nano)
+	PRIMARY KEY (namespace, created_at_unix_nano),
+	INDEX uq_namespace_living GLOBAL SYNC ON (deleted_at_unix_nano, namespace) COVER (serialized_config)
 );`
 
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	// ideally PK should be (name, deleted_at_unix_nano), but since deleted_at_unix_nano is
 	// updated during delete operation it cannot be used. simply (name) is also not applicable
-	// b/c here might be deleted caveats with the same name as currently living.
+	// b/c there might be deleted caveats with the same name as currently living.
 	// uq_caveat_living columns order is determined by list caveats queries.
 	createCaveat = `
 CREATE TABLE caveat (
@@ -64,7 +67,7 @@ CREATE TABLE caveat (
 );`
 
 	// todo discuss JsonDocument instead of Json.
-	// todo check Ensure on insert.
+	// todo check Ensure on insert, check indexed.
 	// todo AUTO_PARTITIONING_BY_LOAD?
 	createRelationTuple = `
 CREATE TABLE relation_tuple (
@@ -78,7 +81,7 @@ CREATE TABLE relation_tuple (
 	caveat_context JsonDocument,
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
-	PRIMARY KEY (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, created_at_unix_nano, deleted_at_unix_nano),
+	PRIMARY KEY (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, created_at_unix_nano),
 	INDEX uq_relation_tuple_living GLOBAL SYNC ON (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, deleted_at_unix_nano),
 	INDEX ix_relation_tuple_by_subject GLOBAL SYNC ON (userset_object_id, userset_namespace, userset_relation, namespace, relation),
 	INDEX ix_relation_tuple_by_subject_relation GLOBAL SYNC ON (userset_namespace, userset_relation, namespace, relation),
