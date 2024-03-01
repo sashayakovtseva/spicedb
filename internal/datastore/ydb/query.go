@@ -295,6 +295,9 @@ func executeDeleteQuery(
 	deleteRev revisions.TimestampRevision,
 	pred sq.Sqlizer,
 ) error {
+	ctx, span := tracer.Start(ctx, "executeDeleteQuery")
+	defer span.End()
+
 	return executeQuery(
 		ctx,
 		tablePathPrefix,
@@ -305,6 +308,9 @@ func executeDeleteQuery(
 
 // executeQuery is a helper for queries that don't care about result set.
 func executeQuery(ctx context.Context, tablePathPrefix string, executor queryExecutor, q sq.Yqliser) error {
+	ctx, span := tracer.Start(ctx, "executeQuery")
+	defer span.End()
+
 	sql, args, err := q.ToYQL()
 	if err != nil {
 		return fmt.Errorf("failed to build query: %w", err)

@@ -9,6 +9,7 @@ import (
 	"github.com/jzelinskie/stringz"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
@@ -302,7 +303,8 @@ func (rw *ydbReadWriter) selectTuples(
 	ctx context.Context,
 	in []*core.RelationTuple,
 ) ([]*core.RelationTuple, error) {
-	span := trace.SpanFromContext(ctx)
+	ctx, span := tracer.Start(ctx, "selectTuples", trace.WithAttributes(attribute.Int("count", len(in))))
+	defer span.End()
 
 	if len(in) == 0 {
 		return nil, nil
@@ -339,6 +341,9 @@ func writeDefinitions[T coreDefinition](
 	defs []T,
 	useVT bool,
 ) error {
+	ctx, span := tracer.Start(ctx, "writeDefinitions", trace.WithAttributes(attribute.Int("count", len(defs))))
+	defer span.End()
+
 	if len(defs) == 0 {
 		return nil
 	}
