@@ -87,8 +87,8 @@ func (r *ydbReader) LookupCaveatsWithNames(ctx context.Context, names []string) 
 	}
 
 	var clause sq.Or
-	for _, nsName := range names {
-		clause = append(clause, sq.Eq{colName: nsName})
+	for _, name := range names {
+		clause = append(clause, sq.Eq{colName: name})
 	}
 
 	caveatsWithRevisions, err := loadAllCaveats(
@@ -155,19 +155,33 @@ func (r *ydbReader) ReverseQueryRelationships(
 	)
 }
 
+// ReadNamespaceByName returns a namespaces with the provided name.
+// It returns an instance of ErrNamespaceNotFound if not found.
+// For snapshot reads this is a table range scan operation.
+// For latest data reads this is an index's table range scan operation.
 func (r *ydbReader) ReadNamespaceByName(
 	ctx context.Context,
-	nsName string,
+	name string,
 ) (*core.NamespaceDefinition, datastore.Revision, error) {
-	loaded, version, err := r.loadNamespace(ctx, nsName)
+	loaded, version, err := r.loadNamespace(ctx, name)
 	if err != nil {
 		return nil, datastore.NoRevision, fmt.Errorf("filed to read namespace: %w", err)
 	}
 	return loaded, version, nil
 }
 
+// ListAllNamespaces returns all namespaces stored in the system.
+// For snapshot reads this is  an index's table range scan operation.
+// For latest data reads this is an index's table range scan operation.
 func (r *ydbReader) ListAllNamespaces(ctx context.Context) ([]datastore.RevisionedNamespace, error) {
-	nsDefsWithRevisions, err := loadAllNamespaces(ctx, r.tablePathPrefix, r.executor, r.modifier)
+	nsDefsWithRevisions, err := loadAllNamespaces(
+		ctx,
+		r.tablePathPrefix,
+		r.executor,
+		func(builder sq.SelectBuilder) sq.SelectBuilder {
+			return r.modifier(builder).View(ixUqNamespaceLiving)
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
@@ -175,17 +189,20 @@ func (r *ydbReader) ListAllNamespaces(ctx context.Context) ([]datastore.Revision
 	return nsDefsWithRevisions, err
 }
 
+// LookupNamespacesWithNames finds all namespaces with the matching names.
+// For snapshot reads this is a table range scan operation.
+// For latest data reads this is an index's table range scan operation.
 func (r *ydbReader) LookupNamespacesWithNames(
 	ctx context.Context,
-	nsNames []string,
+	names []string,
 ) ([]datastore.RevisionedNamespace, error) {
-	if len(nsNames) == 0 {
+	if len(names) == 0 {
 		return nil, nil
 	}
 
 	var clause sq.Or
-	for _, nsName := range nsNames {
-		clause = append(clause, sq.Eq{colNamespace: nsName})
+	for _, name := range names {
+		clause = append(clause, sq.Eq{colNamespace: name})
 	}
 
 	nsDefsWithRevisions, err := loadAllNamespaces(
@@ -193,7 +210,12 @@ func (r *ydbReader) LookupNamespacesWithNames(
 		r.tablePathPrefix,
 		r.executor,
 		func(builder sq.SelectBuilder) sq.SelectBuilder {
-			return r.modifier(builder).Where(clause)
+			builder = r.modifier(builder).Where(clause)
+			if !r.isSnapshotRead {
+				builder = builder.View(ixUqNamespaceLiving)
+			}
+			return builder
+
 		},
 	)
 	if err != nil {
@@ -215,7 +237,11 @@ func (r *ydbReader) loadNamespace(
 		r.tablePathPrefix,
 		r.executor,
 		func(builder sq.SelectBuilder) sq.SelectBuilder {
-			return r.modifier(builder).Where(sq.Eq{colNamespace: namespace})
+			builder = r.modifier(builder).Where(sq.Eq{colNamespace: namespace})
+			if !r.isSnapshotRead {
+				builder = builder.View(ixUqNamespaceLiving)
+			}
+			return builder
 		},
 	)
 	if err != nil {

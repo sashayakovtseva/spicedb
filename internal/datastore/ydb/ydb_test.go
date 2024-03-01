@@ -37,8 +37,7 @@ func TestMain(m *testing.M) {
 func TestYDBDatastore(t *testing.T) {
 	t.Skip("unimplemented datastore")
 
-	b := testdatastore.RunYDBForTesting(t, "")
-	test.All(t,
+	test.AllWithExceptions(t,
 		test.DatastoreTesterFunc(func(
 			revisionQuantization time.Duration,
 			gcInterval time.Duration,
@@ -46,10 +45,13 @@ func TestYDBDatastore(t *testing.T) {
 			watchBufferLength uint16,
 		) (datastore.Datastore, error) {
 			ctx := context.Background()
-			ds := b.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
+			ds := ydbTestEngine.NewDatastore(t, func(engine, dsn string) datastore.Datastore {
 				ds, err := NewYDBDatastore(
 					ctx,
 					dsn,
+					RevisionQuantization(revisionQuantization),
+					GCInterval(gcInterval),
+					GCWindow(gcWindow),
 				)
 				require.NoError(t, err)
 				return ds
@@ -57,5 +59,6 @@ func TestYDBDatastore(t *testing.T) {
 
 			return ds, nil
 		}),
+		test.WithCategories(test.GCCategory, test.WatchCategory),
 	)
 }
