@@ -37,6 +37,7 @@ func NamespaceNotFoundTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx := context.Background()
 
@@ -54,6 +55,7 @@ func NamespaceWriteTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx := context.Background()
 
@@ -145,6 +147,7 @@ func NamespaceDeleteTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, revision := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -193,6 +196,7 @@ func NamespaceDeleteTest(t *testing.T, tester DatastoreTester) {
 func NamespaceMultiDeleteTest(t *testing.T, tester DatastoreTester) {
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, revision := testfixtures.StandardDatastoreWithData(rawDS, require.New(t))
 	ctx := context.Background()
@@ -221,6 +225,7 @@ func EmptyNamespaceDeleteTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, revision := testfixtures.StandardDatastoreWithData(rawDS, require)
 	ctx := context.Background()
@@ -266,6 +271,7 @@ definition document {
 	// Write the namespace definition to the datastore.
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx := context.Background()
 	updatedRevision, err := ds.ReadWriteTx(ctx, func(ctx context.Context, rwt datastore.ReadWriteTransaction) error {

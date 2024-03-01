@@ -60,6 +60,7 @@ func WatchTest(t *testing.T, tester DatastoreTester) {
 
 			ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 16)
 			require.NoError(err)
+			t.Cleanup(func() { _ = ds.Close() })
 
 			setupDatastore(ds, require)
 
@@ -191,6 +192,7 @@ func WatchCancelTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	startWatchRevision := setupDatastore(ds, require)
 
@@ -237,6 +239,7 @@ func WatchWithTouchTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 16)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	setupDatastore(ds, require)
 
@@ -342,6 +345,7 @@ func WatchWithDeleteTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 16)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	setupDatastore(ds, require)
 
@@ -434,6 +438,7 @@ func WatchSchemaTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 16)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	setupDatastore(ds, require)
 
@@ -494,6 +499,7 @@ func WatchAllTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 16)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	setupDatastore(ds, require)
 
@@ -626,6 +632,7 @@ func WatchCheckpointsTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 16)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	setupDatastore(ds, require)
 

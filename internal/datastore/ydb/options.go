@@ -18,6 +18,8 @@ type ydbConfig struct {
 	gcInterval         time.Duration
 	gcMaxOperationTime time.Duration
 
+	bulkLoadBatchSize int
+
 	// todo find a way to use it
 	maxRetries uint8
 
@@ -29,12 +31,13 @@ var defaultConfig = ydbConfig{
 	tablePathPrefix:             "",
 	watchBufferLength:           0,
 	watchBufferWriteTimeout:     0,
-	followerReadDelay:           5 * time.Second,
+	followerReadDelay:           0 * time.Second,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
 	gcWindow:                    24 * time.Hour,
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
+	bulkLoadBatchSize:           1000,
 	maxRetries:                  0,
 	gcEnabled:                   false,
 	enablePrometheusStats:       false,
@@ -103,7 +106,14 @@ func MaxRevisionStalenessPercent(stalenessPercent float64) Option {
 
 // FollowerReadDelay is the time delay to apply to enable historical reads.
 //
-// This value defaults to 5 seconds.
+// This value defaults to 0 seconds.
 func FollowerReadDelay(delay time.Duration) Option {
 	return func(o *ydbConfig) { o.followerReadDelay = delay }
+}
+
+// BulkLoadBatchSize is the number of rows BulkLoad will process in a single batch.
+//
+// This value defaults to 1000.
+func BulkLoadBatchSize(limit int) Option {
+	return func(o *ydbConfig) { o.bulkLoadBatchSize = limit }
 }

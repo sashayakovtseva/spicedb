@@ -29,6 +29,7 @@ func CaveatNotFoundTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx := context.Background()
 
@@ -43,6 +44,7 @@ func WriteReadDeleteCaveatTest(t *testing.T, tester DatastoreTester) {
 	req := require.New(t)
 	ds, err := tester.New(0*time.Second, veryLargeGCInterval, veryLargeGCWindow, 1)
 	req.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	skipIfNotCaveatStorer(t, ds)
 
@@ -130,6 +132,7 @@ func WriteCaveatedRelationshipTest(t *testing.T, tester DatastoreTester) {
 	req := require.New(t)
 	ds, err := tester.New(0*time.Second, veryLargeGCInterval, veryLargeGCWindow, 1)
 	req.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	skipIfNotCaveatStorer(t, ds)
 
@@ -203,6 +206,7 @@ func CaveatedRelationshipFilterTest(t *testing.T, tester DatastoreTester) {
 	req := require.New(t)
 	ds, err := tester.New(0*time.Second, veryLargeGCInterval, veryLargeGCWindow, 1)
 	req.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	skipIfNotCaveatStorer(t, ds)
 
@@ -245,6 +249,7 @@ func CaveatSnapshotReadsTest(t *testing.T, tester DatastoreTester) {
 	req := require.New(t)
 	ds, err := tester.New(0*time.Second, veryLargeGCInterval, veryLargeGCWindow, 1)
 	req.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	skipIfNotCaveatStorer(t, ds)
 
@@ -278,6 +283,7 @@ func CaveatedRelationshipWatchTest(t *testing.T, tester DatastoreTester) {
 	req := require.New(t)
 	ds, err := tester.New(0*time.Second, veryLargeGCInterval, veryLargeGCWindow, 16)
 	req.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	skipIfNotCaveatStorer(t, ds)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -34,6 +34,7 @@ func RevisionQuantizationTest(t *testing.T, tester DatastoreTester) {
 
 			ds, err := tester.New(tc.quantizationRange, veryLargeGCInterval, veryLargeGCWindow, 1)
 			require.NoError(err)
+			t.Cleanup(func() { _ = ds.Close() })
 
 			ctx := context.Background()
 			veryFirstRevision, err := ds.OptimizedRevision(ctx)
@@ -59,6 +60,7 @@ func RevisionQuantizationTest(t *testing.T, tester DatastoreTester) {
 			time.Sleep(tc.quantizationRange)
 
 			// Now we should ONLY get revisions later than the now revision
+			// IF follower read delay is set to 0
 			for start := time.Now(); time.Since(start) < 10*time.Millisecond; {
 				testRevision, err := ds.OptimizedRevision(ctx)
 				require.NoError(err)
@@ -75,6 +77,7 @@ func RevisionSerializationTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -98,6 +101,7 @@ func RevisionGCTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, 10*time.Millisecond, 300*time.Millisecond, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -141,7 +145,7 @@ func RevisionGCTest(t *testing.T, tester DatastoreTester) {
 	// require.Error(ds.CheckRevision(ctx, head), "expected head revision to be valid if out of GC window")
 	//
 	// latest state of the system is invalid if head revision is out of GC window
-	//_, _, err = ds.SnapshotReader(head).ReadNamespaceByName(ctx, "foo/bar")
+	// _, _, err = ds.SnapshotReader(head).ReadNamespaceByName(ctx, "foo/bar")
 	// require.Error(err, "expected previously written schema to exist at out-of-GC window head")
 
 	// check freshly fetched head revision is valid after GC window elapsed
@@ -177,6 +181,7 @@ func SequentialRevisionsTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, 10*time.Second, 300*time.Minute, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -200,6 +205,7 @@ func ConcurrentRevisionsTest(t *testing.T, tester DatastoreTester) {
 
 	ds, err := tester.New(0, 10*time.Second, 300*time.Minute, 1)
 	require.NoError(err)
+	t.Cleanup(func() { _ = ds.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

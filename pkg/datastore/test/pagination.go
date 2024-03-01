@@ -32,6 +32,7 @@ func OrderingTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, rev := testfixtures.StandardDatastoreWithData(rawDS, require.New(t))
 	tRequire := testfixtures.TupleChecker{Require: require.New(t), DS: ds}
@@ -107,6 +108,7 @@ func LimitTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, rev := testfixtures.StandardDatastoreWithData(rawDS, require.New(t))
 	tRequire := testfixtures.TupleChecker{Require: require.New(t), DS: ds}
@@ -202,6 +204,7 @@ var orderedTestCases = []struct {
 func OrderedLimitTest(t *testing.T, tester DatastoreTester) {
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, rev := testfixtures.StandardDatastoreWithData(rawDS, require.New(t))
 	tRequire := testfixtures.TupleChecker{Require: require.New(t), DS: ds}
@@ -255,6 +258,7 @@ func OrderedLimitTest(t *testing.T, tester DatastoreTester) {
 func ResumeTest(t *testing.T, tester DatastoreTester) {
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, rev := testfixtures.StandardDatastoreWithData(rawDS, require.New(t))
 	tRequire := testfixtures.TupleChecker{Require: require.New(t), DS: ds}
@@ -325,6 +329,7 @@ func CursorErrorsTest(t *testing.T, tester DatastoreTester) {
 
 	rawDS, err := tester.New(0, veryLargeGCInterval, veryLargeGCWindow, 1)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDS.Close() })
 
 	ds, rev := testfixtures.StandardDatastoreWithData(rawDS, require.New(t))
 	ctx := context.Background()
