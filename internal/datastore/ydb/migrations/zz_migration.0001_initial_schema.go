@@ -36,7 +36,6 @@ CREATE TABLE metadata (
 	PRIMARY KEY (unique_id)
 );`
 
-	// todo AUTO_PARTITIONING_BY_LOAD?
 	// ideally PK should be (namespace, deleted_at_unix_nano), but since deleted_at_unix_nano is
 	// updated during delete operation it cannot be used. simply (namespace) is also not applicable
 	// b/c there might be deleted namespaces with the same name as currently living.
@@ -49,9 +48,13 @@ CREATE TABLE namespace_config (
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (namespace, created_at_unix_nano),
 	INDEX uq_namespace_living GLOBAL SYNC ON (deleted_at_unix_nano, namespace) COVER (serialized_config)
+)
+WITH (
+    AUTO_PARTITIONING_BY_SIZE = DISABLED,
+    AUTO_PARTITIONING_BY_LOAD = ENABLED,
+    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 3
 );`
 
-	// todo AUTO_PARTITIONING_BY_LOAD?
 	// ideally PK should be (name, deleted_at_unix_nano), but since deleted_at_unix_nano is
 	// updated during delete operation it cannot be used. simply (name) is also not applicable
 	// b/c there might be deleted caveats with the same name as currently living.
@@ -64,10 +67,14 @@ CREATE TABLE caveat (
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (name, created_at_unix_nano),
 	INDEX uq_caveat_living GLOBAL SYNC ON (deleted_at_unix_nano, name) COVER (definition)
+)
+WITH (
+    AUTO_PARTITIONING_BY_SIZE = DISABLED,
+    AUTO_PARTITIONING_BY_LOAD = ENABLED,
+    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 3
 );`
 
 	// todo use correct indexes.
-	// todo AUTO_PARTITIONING_BY_LOAD?
 	createRelationTuple = `
 CREATE TABLE relation_tuple (
 	namespace Utf8 NOT NULL,
@@ -86,9 +93,13 @@ CREATE TABLE relation_tuple (
 	INDEX ix_relation_tuple_by_subject_relation GLOBAL SYNC ON (userset_namespace, userset_relation, namespace, relation),
 	INDEX ix_relation_tuple_alive_by_resource_rel_subject_covering GLOBAL SYNC ON (namespace, relation, userset_namespace) COVER (caveat_name, caveat_context),
 	INDEX ix_gc_index GLOBAL SYNC ON (deleted_at_unix_nano)
+)
+WITH (
+    AUTO_PARTITIONING_BY_SIZE = DISABLED,
+    AUTO_PARTITIONING_BY_LOAD = ENABLED,
+    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 3
 );`
 
-	// todo TOPIC_MIN_ACTIVE_PARTITIONS?
 	createNamespaceConfigChangefeed = `
 ALTER TABLE namespace_config
 ADD CHANGEFEED spicedb_watch 
