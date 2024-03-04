@@ -63,6 +63,7 @@ type ydbDatastore struct {
 	closeOnce sync.Once
 	// isClosed used in HeadRevision only to pass datastore tests.
 	isClosed atomic.Bool
+	watchWg  sync.WaitGroup
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
@@ -118,6 +119,8 @@ func (y *ydbDatastore) Close() error {
 
 	var err error
 	y.closeOnce.Do(func() {
+		y.watchWg.Wait()
+
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
 		defer cancel()
 
@@ -159,7 +162,7 @@ func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, er
 }
 
 func (y *ydbDatastore) Features(_ context.Context) (*datastore.Features, error) {
-	return &datastore.Features{Watch: datastore.Feature{Enabled: false}}, nil
+	return &datastore.Features{Watch: datastore.Feature{Enabled: true}}, nil
 }
 
 func (y *ydbDatastore) SnapshotReader(revision datastore.Revision) datastore.Reader {

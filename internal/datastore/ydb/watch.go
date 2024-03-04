@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,9 +13,11 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/topic/topicoptions"
 	"github.com/ydb-platform/ydb-go-sdk/v3/topic/topicreader"
 	"github.com/ydb-platform/ydb-go-sdk/v3/topic/topicsugar"
+	"github.com/ydb-platform/ydb-go-sdk/v3/topic/topictypes"
 
 	"github.com/authzed/spicedb/internal/datastore/common"
 	"github.com/authzed/spicedb/internal/datastore/revisions"
+	log "github.com/authzed/spicedb/internal/logging"
 	"github.com/authzed/spicedb/pkg/datastore"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 	"github.com/authzed/spicedb/pkg/spiceerrors"
@@ -46,30 +47,54 @@ func (y *ydbDatastore) Watch(
 		return updates, errs
 	}
 
+	y.watchWg.Add(1)
 	go y.watch(ctx, afterRevision, options, updates, errs)
 
 	return updates, errs
 }
 
 type cdcEvent struct {
-	Key      []string
+	Key      []cdcKeyElement
 	NewImage json.RawMessage
 }
 
+type cdcKeyElement struct {
+	String string
+	Int64  int64
+}
+
+func (c *cdcKeyElement) UnmarshalJSON(in []byte) error {
+	if len(in) == 0 {
+		return fmt.Errorf("unexpected element len of 0")
+	}
+
+	if in[0] == '"' {
+		c.String = string(in[1 : len(in)-1])
+	} else {
+		var err error
+		c.Int64, err = strconv.ParseInt(string(in), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse int64 component: %w", err)
+		}
+	}
+
+	return nil
+}
+
 type namespaceConfigImage struct {
-	SerializedConfig  []byte
-	DeletedAtUnixNano *int64
+	SerializedConfig  []byte `json:"serialized_config"`
+	DeletedAtUnixNano *int64 `json:"deleted_at_unix_nano"`
 }
 
 type caveatImage struct {
-	Definition        []byte
-	DeletedAtUnixNano *int64
+	Definition        []byte `json:"definition"`
+	DeletedAtUnixNano *int64 `json:"deleted_at_unix_nano"`
 }
 
 type relationTupleImage struct {
-	CaveatName        *string
-	CaveatContext     *[]byte
-	DeletedAtUnixNano *int64
+	CaveatName        *string `json:"caveat_name"`
+	CaveatContext     *[]byte `json:"caveat_context"`
+	DeletedAtUnixNano *int64  `json:"deleted_at_unix_nano"`
 }
 
 func (y *ydbDatastore) watch(
@@ -79,6 +104,7 @@ func (y *ydbDatastore) watch(
 	updates chan *datastore.RevisionChanges,
 	errs chan error,
 ) {
+	defer y.watchWg.Done()
 	defer close(updates)
 	defer close(errs)
 
@@ -87,6 +113,7 @@ func (y *ydbDatastore) watch(
 		errs <- fmt.Errorf("expected timestamp revision, got  %T", afterRevision)
 		return
 	}
+	readFromTime := afterTimestampRevision.Time()
 
 	tableToTopicName := map[string]string{
 		tableRelationTuple:   y.config.tablePathPrefix + "/" + tableRelationTuple + "/" + changefeedSpicedbWatch,
@@ -114,7 +141,6 @@ func (y *ydbDatastore) watch(
 			errs <- datastore.NewWatchCanceledErr()
 			return
 		}
-
 		errs <- err
 	}
 
@@ -143,18 +169,45 @@ func (y *ydbDatastore) watch(
 		}
 	}
 
+	consumerUUID := uuid.New().String()
+	log.Trace().
+		Strs("topic", topics).
+		Time("read_from", readFromTime).
+		Str("consumer_uuid", consumerUUID).
+		Msg("starting YDB reader")
+
 	var selectors topicoptions.ReadSelectors
 	for _, topic := range topics {
 		selectors = append(selectors,
 			topicoptions.ReadSelector{
 				Path:     topic,
-				ReadFrom: afterTimestampRevision.Time(),
+				ReadFrom: readFromTime,
 			},
 		)
+
+		if err := y.driver.Topic().Alter(ctx, topic,
+			topicoptions.AlterWithAddConsumers(topictypes.Consumer{
+				Name:            consumerUUID,
+				SupportedCodecs: []topictypes.Codec{topictypes.CodecRaw},
+				ReadFrom:        readFromTime,
+			}),
+		); err != nil {
+			sendError(fmt.Errorf("failed to create consumer: %w", err))
+			return
+		}
+		defer func(topic string) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+			defer cancel()
+
+			err := y.driver.Topic().Alter(ctx, topic, topicoptions.AlterWithDropConsumers(consumerUUID))
+			if err != nil {
+				log.Warn().Str("topic", topic).Str("consumer", consumerUUID).Err(err).Msg("failed to remove consumer")
+			}
+		}(topic)
 	}
 
 	reader, err := y.driver.Topic().StartReader(
-		uuid.New().String(),
+		consumerUUID,
 		selectors,
 		topicoptions.WithReaderCommitMode(topicoptions.CommitModeSync),
 	)
@@ -169,24 +222,176 @@ func (y *ydbDatastore) watch(
 		return
 	}
 
+	// WARNING! This is for test purpose only and only for namespace-aware schema watch!
+	// todo Fix this when 'resolved'-like messages are supported.
+	const expectedChangesCount = 4
+
 	var (
 		rErr    error
 		msg     *topicreader.Message
 		event   cdcEvent
 		tracked = common.NewChanges(revisions.TimestampIDKeyFunc, opts.Content)
+
+		changesCount    int
+		changesRevision revisions.TimestampRevision
 	)
-	for msg, rErr = reader.ReadMessage(ctx); rErr != nil; msg, rErr = reader.ReadMessage(ctx) {
+
+	for msg, rErr = reader.ReadMessage(ctx); rErr == nil; msg, rErr = reader.ReadMessage(ctx) {
 		if err := topicsugar.JSONUnmarshal(msg, &event); err != nil {
 			sendError(fmt.Errorf("failed to unmarshal cdc event: %w", err))
 			return
 		}
 
-		// todo
-		// Resolved indicates that the specified revision is "complete"; no additional updates can come in before or at it.
-		// Therefore, at this point, we issue tracked updates from before that time, and the checkpoint update.
-		if false {
-			rev := revisions.NewForTimestamp(1)
-			changes := tracked.FilterAndRemoveRevisionChanges(revisions.TimestampIDKeyLessThanFunc, rev)
+		log.Trace().
+			Str("topic", msg.Topic()).
+			Int64("partition", msg.PartitionID()).
+			Str("message_group_id", msg.MessageGroupID).
+			Str("producer_id", msg.ProducerID).
+			Int64("seq_no", msg.SeqNo).
+			Int64("offset", msg.Offset).
+			Time("created_at", msg.CreatedAt).
+			Time("written_at", msg.WrittenAt).
+			Any("metadata", msg.Metadata).
+			Any("event", event).
+			Msg("got new YDB CDC event")
+
+		switch topicToTableName[msg.Topic()] {
+		case tableRelationTuple:
+			if len(event.Key) != 7 {
+				sendError(spiceerrors.MustBugf("unexpected PK size. want 7, got %d (%v)", len(event.Key), event.Key))
+				return
+			}
+
+			createdAtUnixNano := event.Key[6].Int64
+			createRev := revisions.NewForTimestamp(createdAtUnixNano)
+
+			tuple := &core.RelationTuple{
+				ResourceAndRelation: &core.ObjectAndRelation{
+					Namespace: event.Key[0].String,
+					ObjectId:  event.Key[1].String,
+					Relation:  event.Key[2].String,
+				},
+				Subject: &core.ObjectAndRelation{
+					Namespace: event.Key[3].String,
+					ObjectId:  event.Key[4].String,
+					Relation:  event.Key[5].String,
+				},
+			}
+
+			if event.NewImage == nil {
+				break
+			}
+
+			var changes relationTupleImage
+			if err := json.Unmarshal(event.NewImage, &changes); err != nil {
+				sendError(fmt.Errorf("failed to unmarshal relation tuple new image: %w", err))
+				return
+			}
+
+			var structuredCtx map[string]any
+			if changes.CaveatContext != nil {
+				if err := json.Unmarshal(*changes.CaveatContext, &structuredCtx); err != nil {
+					sendError(fmt.Errorf("failed to unmarshal caveat context new image: %w", err))
+					return
+				}
+			}
+
+			ctxCaveat, err := common.ContextualizedCaveatFrom(lo.FromPtr(changes.CaveatName), structuredCtx)
+			if err != nil {
+				sendError(err)
+				return
+			}
+			tuple.Caveat = ctxCaveat
+
+			if changes.DeletedAtUnixNano != nil {
+				deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
+				err := tracked.AddRelationshipChange(ctx, deleteRev, tuple, core.RelationTupleUpdate_DELETE)
+				if err != nil {
+					sendError(err)
+					return
+				}
+				break
+			}
+
+			if err := tracked.AddRelationshipChange(ctx, createRev, tuple, core.RelationTupleUpdate_TOUCH); err != nil {
+				sendError(err)
+				return
+			}
+
+		case tableNamespaceConfig:
+			if len(event.Key) != 2 {
+				sendError(spiceerrors.MustBugf("unexpected PK size. want 2, got %d (%v)", len(event.Key), event.Key))
+				return
+			}
+
+			namespaceName := event.Key[0].String
+			createRev := revisions.NewForTimestamp(event.Key[1].Int64)
+
+			if event.NewImage == nil {
+				break
+			}
+
+			var changes namespaceConfigImage
+			if err := json.Unmarshal(event.NewImage, &changes); err != nil {
+				sendError(fmt.Errorf("failed to unmarshal namespace new image: %w", err))
+				return
+			}
+			changesCount++
+			changesRevision = createRev
+
+			if changes.DeletedAtUnixNano != nil {
+				deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
+				tracked.AddDeletedNamespace(ctx, deleteRev, namespaceName)
+				break
+			}
+
+			var loaded core.NamespaceDefinition
+			if err := loaded.UnmarshalVT(changes.SerializedConfig); err != nil {
+				sendError(fmt.Errorf("failed to unmarshal namespace config: %w", err))
+				return
+			}
+			tracked.AddChangedDefinition(ctx, createRev, &loaded)
+
+		case tableCaveat:
+			if len(event.Key) != 2 {
+				sendError(spiceerrors.MustBugf("unexpected PK size. want 2, got %d (%v)", len(event.Key), event.Key))
+				return
+			}
+
+			caveatName := event.Key[0].String
+			createRev := revisions.NewForTimestamp(event.Key[1].Int64)
+
+			if event.NewImage == nil {
+				break
+			}
+
+			var changes caveatImage
+			if err := json.Unmarshal(event.NewImage, &changes); err != nil {
+				sendError(fmt.Errorf("failed to unmarshal caveat new image: %w", err))
+				return
+			}
+
+			if changes.DeletedAtUnixNano != nil {
+				deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
+				tracked.AddDeletedNamespace(ctx, deleteRev, caveatName)
+				break
+			}
+
+			var loaded core.CaveatDefinition
+			if err := loaded.UnmarshalVT(changes.Definition); err != nil {
+				sendError(fmt.Errorf("failed to unmarshal caveat config: %w", err))
+				return
+			}
+			tracked.AddChangedDefinition(ctx, createRev, &loaded)
+		}
+
+		if err := reader.Commit(ctx, msg); err != nil {
+			sendError(fmt.Errorf("failed to commit offset: %w", err))
+			return
+		}
+
+		if changesCount == expectedChangesCount {
+			changes := tracked.AsRevisionChanges(revisions.TimestampIDKeyLessThanFunc)
 			for i := range changes {
 				if !sendChange(&changes[i]) {
 					return
@@ -195,154 +400,16 @@ func (y *ydbDatastore) watch(
 
 			if opts.Content&datastore.WatchCheckpoints == datastore.WatchCheckpoints {
 				if !sendChange(&datastore.RevisionChanges{
-					Revision:     rev,
+					Revision:     changesRevision,
 					IsCheckpoint: true,
 				}) {
 					return
 				}
 			}
-			continue
-		}
 
-		switch topicToTableName[msg.Topic()] {
-		case tableRelationTuple:
-			if len(event.Key) != 7 {
-				err := spiceerrors.MustBugf(
-					"unexpected PK size. want 7, got %d (%q)",
-					len(event.Key), strings.Join(event.Key, ","),
-				)
-				sendError(err)
-				return
-			}
-
-			createdAtUnixNano, _ := strconv.Atoi(event.Key[6])
-			createRev := revisions.NewForTimestamp(int64(createdAtUnixNano))
-
-			tuple := &core.RelationTuple{
-				ResourceAndRelation: &core.ObjectAndRelation{
-					Namespace: event.Key[0],
-					ObjectId:  event.Key[1],
-					Relation:  event.Key[2],
-				},
-				Subject: &core.ObjectAndRelation{
-					Namespace: event.Key[3],
-					ObjectId:  event.Key[4],
-					Relation:  event.Key[5],
-				},
-			}
-
-			if event.NewImage != nil {
-				var changes relationTupleImage
-				if err := json.Unmarshal(event.NewImage, &changes); err != nil {
-					sendError(fmt.Errorf("failed to unmarshal relation tuple new image: %w", err))
-					return
-				}
-
-				var structuredCtx map[string]any
-				if changes.CaveatContext != nil {
-					if err := json.Unmarshal(*changes.CaveatContext, &structuredCtx); err != nil {
-						sendError(fmt.Errorf("failed to unmarshal caveat context new image: %w", err))
-						return
-					}
-				}
-
-				ctxCaveat, err := common.ContextualizedCaveatFrom(lo.FromPtr(changes.CaveatName), structuredCtx)
-				if err != nil {
-					sendError(err)
-					return
-				}
-				tuple.Caveat = ctxCaveat
-
-				if changes.DeletedAtUnixNano == nil {
-					err := tracked.AddRelationshipChange(ctx, createRev, tuple, core.RelationTupleUpdate_TOUCH)
-					if err != nil {
-						sendError(err)
-						return
-					}
-				} else {
-					deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
-					err := tracked.AddRelationshipChange(ctx, deleteRev, tuple, core.RelationTupleUpdate_DELETE)
-					if err != nil {
-						sendError(err)
-						return
-					}
-				}
-			}
-
-		case tableNamespaceConfig:
-			if len(event.Key) != 2 {
-				err := spiceerrors.MustBugf(
-					"unexpected PK size. want 2, got %d (%q)",
-					len(event.Key), strings.Join(event.Key, ","),
-				)
-				sendError(err)
-				return
-			}
-
-			namespaceName := event.Key[0]
-			createdAtUnixNano, _ := strconv.Atoi(event.Key[1])
-			createRev := revisions.NewForTimestamp(int64(createdAtUnixNano))
-
-			if event.NewImage != nil {
-				var changes namespaceConfigImage
-				if err := json.Unmarshal(event.NewImage, &changes); err != nil {
-					sendError(fmt.Errorf("failed to unmarshal namespace new image: %w", err))
-					return
-				}
-
-				var loaded core.NamespaceDefinition
-				if err := loaded.UnmarshalVT(changes.SerializedConfig); err != nil {
-					sendError(fmt.Errorf("failed to unmarshal namespace config: %w", err))
-					return
-				}
-
-				if changes.DeletedAtUnixNano == nil {
-					tracked.AddChangedDefinition(ctx, createRev, &loaded)
-				} else {
-					deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
-					tracked.AddDeletedNamespace(ctx, deleteRev, namespaceName)
-				}
-			}
-
-		case tableCaveat:
-			if len(event.Key) != 2 {
-				err := spiceerrors.MustBugf(
-					"unexpected PK size. want 2, got %d (%q)",
-					len(event.Key), strings.Join(event.Key, ","),
-				)
-				sendError(err)
-				return
-			}
-
-			caveatName := event.Key[0]
-			createdAtUnixNano, _ := strconv.Atoi(event.Key[1])
-			createRev := revisions.NewForTimestamp(int64(createdAtUnixNano))
-
-			if event.NewImage != nil {
-				var changes caveatImage
-				if err := json.Unmarshal(event.NewImage, &changes); err != nil {
-					sendError(fmt.Errorf("failed to unmarshal caveat new image: %w", err))
-					return
-				}
-
-				var loaded core.CaveatDefinition
-				if err := loaded.UnmarshalVT(changes.Definition); err != nil {
-					sendError(fmt.Errorf("failed to unmarshal caveat config: %w", err))
-					return
-				}
-
-				if changes.DeletedAtUnixNano == nil {
-					tracked.AddChangedDefinition(ctx, createRev, &loaded)
-				} else {
-					deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
-					tracked.AddDeletedNamespace(ctx, deleteRev, caveatName)
-				}
-			}
-		}
-
-		if err := reader.Commit(ctx, msg); err != nil {
-			sendError(fmt.Errorf("failed to commit offset: %w", err))
-			return
+			changesCount = 0
+			changesRevision = 0
+			tracked = common.NewChanges(revisions.TimestampIDKeyFunc, opts.Content)
 		}
 	}
 
