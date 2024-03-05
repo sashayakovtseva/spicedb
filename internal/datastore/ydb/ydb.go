@@ -32,7 +32,7 @@ func init() {
 }
 
 var (
-	_ datastore.Datastore = &ydbDatastore{}
+	_ datastore.Datastore = (*ydbDatastore)(nil)
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 

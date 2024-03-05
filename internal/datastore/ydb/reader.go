@@ -15,6 +15,8 @@ import (
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 )
 
+var _ datastore.Reader = (*ydbReader)(nil)
+
 type ydbReader struct {
 	tablePathPrefix string
 	executor        queryExecutor

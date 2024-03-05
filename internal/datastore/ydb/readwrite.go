@@ -17,10 +17,13 @@ import (
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
+	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 	"github.com/authzed/spicedb/pkg/spiceerrors"
 	"github.com/authzed/spicedb/pkg/tuple"
 )
+
+var _ datastore.ReadWriteTransaction = (*ydbReadWriter)(nil)
 
 type ydbReadWriter struct {
 	*ydbReader
@@ -166,7 +169,16 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 }
 
 // DeleteRelationships deletes all Relationships that match the provided filter.
-func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.RelationshipFilter) error {
+func (rw *ydbReadWriter) DeleteRelationships(
+	ctx context.Context,
+	filter *v1.RelationshipFilter,
+	opts ...options.DeleteOptionsOption,
+) (bool, error) {
+	delOpts := options.NewDeleteOptionsWithOptionsAndDefaults(opts...)
+	if delOpts.DeleteLimit != nil && *delOpts.DeleteLimit > 0 {
+		return false, fmt.Errorf("limit is currently not supported")
+	}
+
 	pred := sq.Eq{
 		colNamespace: filter.GetResourceType(),
 	}
@@ -196,10 +208,10 @@ func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.Rel
 		rw.newRevision,
 		pred,
 	); err != nil {
-		return fmt.Errorf("failed to delete relations: %w", err)
+		return false, fmt.Errorf("failed to delete relations: %w", err)
 	}
 
-	return nil
+	return false, nil
 }
 
 // WriteNamespaces takes proto namespace definitions and persists them.
