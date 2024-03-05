@@ -196,7 +196,7 @@ func (y *ydbDatastore) watch(
 			return
 		}
 		defer func(topic string) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
 
 			err := y.driver.Topic().Alter(ctx, topic, topicoptions.AlterWithDropConsumers(consumerUUID))
