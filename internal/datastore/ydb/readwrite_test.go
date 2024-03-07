@@ -1,3 +1,5 @@
+//go:build ci && docker
+
 package ydb
 
 import (

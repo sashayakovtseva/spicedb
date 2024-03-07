@@ -20,17 +20,14 @@ type ydbConfig struct {
 
 	bulkLoadBatchSize int
 
-	// todo find a way to use it
-	maxRetries uint8
-
 	gcEnabled             bool
 	enablePrometheusStats bool
 }
 
 var defaultConfig = ydbConfig{
 	tablePathPrefix:             "",
-	watchBufferLength:           0,
-	watchBufferWriteTimeout:     0,
+	watchBufferLength:           128,
+	watchBufferWriteTimeout:     time.Second,
 	followerReadDelay:           0 * time.Second,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
@@ -38,8 +35,7 @@ var defaultConfig = ydbConfig{
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
 	bulkLoadBatchSize:           1000,
-	maxRetries:                  0,
-	gcEnabled:                   false,
+	gcEnabled:                   true,
 	enablePrometheusStats:       false,
 }
 
@@ -80,6 +76,13 @@ func GCInterval(interval time.Duration) Option {
 	return func(o *ydbConfig) { o.gcInterval = interval }
 }
 
+// GCEnabled indicates whether garbage collection is enabled.
+//
+// GC is enabled by default.
+func GCEnabled(isGCEnabled bool) Option {
+	return func(o *ydbConfig) { o.gcEnabled = isGCEnabled }
+}
+
 // GCMaxOperationTime is the maximum operation time of a garbage collection pass before it times out.
 //
 // This value defaults to 1 minute.
@@ -116,4 +119,26 @@ func FollowerReadDelay(delay time.Duration) Option {
 // This value defaults to 1000.
 func BulkLoadBatchSize(limit int) Option {
 	return func(o *ydbConfig) { o.bulkLoadBatchSize = limit }
+}
+
+// WatchBufferLength is the number of entries that can be stored in the watch
+// buffer while awaiting read by the client.
+//
+// This value defaults to 128.
+func WatchBufferLength(watchBufferLength uint16) Option {
+	return func(o *ydbConfig) { o.watchBufferLength = watchBufferLength }
+}
+
+// WatchBufferWriteTimeout is the maximum timeout for writing to the watch buffer,
+// after which the caller to the watch will be disconnected.
+func WatchBufferWriteTimeout(watchBufferWriteTimeout time.Duration) Option {
+	return func(o *ydbConfig) { o.watchBufferWriteTimeout = watchBufferWriteTimeout }
+}
+
+// WithEnablePrometheusStats marks whether Prometheus metrics provided by the Postgres
+// clients being used by the datastore are enabled.
+//
+// Prometheus metrics are disabled by default.
+func WithEnablePrometheusStats(enablePrometheusStats bool) Option {
+	return func(o *ydbConfig) { o.enablePrometheusStats = enablePrometheusStats }
 }

@@ -4,11 +4,13 @@ package ydb
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
 
 	log "github.com/authzed/spicedb/internal/logging"
 	testdatastore "github.com/authzed/spicedb/internal/testserver/datastore"
@@ -17,6 +19,13 @@ import (
 )
 
 var ydbTestEngine testdatastore.RunningEngineForTest
+
+// Implement the TestableDatastore interface.
+func (y *ydbDatastore) ExampleRetryableError() error {
+	// todo return conditionally retryable error, otherwise
+	//  we won't pass "retryable retries disabled" test.
+	return retry.RetryableError(fmt.Errorf("some user error"))
+}
 
 func TestMain(m *testing.M) {
 	var (

@@ -3,11 +3,14 @@ package ydb
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/prometheus/client_golang/prometheus"
 	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
+	ydbPrometheus "github.com/ydb-platform/ydb-go-sdk-prometheus"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
@@ -29,12 +32,11 @@ func init() {
 }
 
 var (
-	_ datastore.Datastore = &ydbDatastore{}
-
-	yq = sq.StatementBuilder.PlaceholderFormat(sq.DollarP)
+	_ datastore.Datastore = (*ydbDatastore)(nil)
 
 	ParseRevisionString = revisions.RevisionParser(revisions.Timestamp)
 
+	yq     = sq.StatementBuilder.PlaceholderFormat(sq.DollarP)
 	tracer = otel.Tracer("spicedb/internal/datastore/ydb")
 )
 
@@ -58,8 +60,10 @@ type ydbDatastore struct {
 
 	originalDSN string
 
-	// isClosed used in HeadRevision only to pass datastore tests
+	closeOnce sync.Once
+	// isClosed used in HeadRevision only to pass datastore tests.
 	isClosed atomic.Bool
+	watchWg  sync.WaitGroup
 }
 
 func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatastore, error) {
@@ -70,14 +74,21 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		config.tablePathPrefix = parsedDSN.TablePathPrefix
 	}
 
-	db, err := ydb.Open(
-		ctx,
-		parsedDSN.OriginalDSN,
+	ydbOpts := []ydb.Option{
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydbOtel.WithTraces(),
-	)
+	}
+	if config.enablePrometheusStats {
+		ydbOpts = append(ydbOpts, ydbPrometheus.WithTraces(prometheus.DefaultRegisterer))
+	}
+
+	db, err := ydb.Open(ctx, parsedDSN.OriginalDSN, ydbOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open YDB connectionn: %w", err)
+		return nil, fmt.Errorf("failed to open YDB connection: %w", err)
+	}
+
+	if _, err := db.Scheme().ListDirectory(ctx, config.tablePathPrefix); err != nil {
+		return nil, fmt.Errorf("failed to ping YDB: %w", err)
 	}
 
 	maxRevisionStaleness := time.Duration(float64(config.revisionQuantization.Nanoseconds())*
@@ -102,15 +113,22 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 }
 
 func (y *ydbDatastore) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
-	defer cancel()
-
-	if err := y.driver.Close(ctx); err != nil {
-		log.Warn().Err(err).Msg("failed to shutdown YDB driver")
+	if y.isClosed.Load() {
+		return nil
 	}
 
-	y.isClosed.Store(true)
-	return nil
+	var err error
+	y.closeOnce.Do(func() {
+		y.watchWg.Wait()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+		defer cancel()
+
+		err = y.driver.Close(ctx)
+		y.isClosed.Store(true)
+	})
+
+	return err
 }
 
 func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, error) {
@@ -183,7 +201,12 @@ func (y *ydbDatastore) ReadWriteTx(
 		newRev = revisions.NewForTimestamp(now)
 
 		rw := &ydbReadWriter{
-			ydbReader:         newYDBReader(y.config.tablePathPrefix, tx, livingObjectModifier, false),
+			ydbReader: newYDBReader(
+				y.config.tablePathPrefix,
+				txQueryExecutor{tx: tx},
+				livingObjectModifier,
+				false,
+			),
 			bulkLoadBatchSize: y.config.bulkLoadBatchSize,
 			newRevision:       newRev,
 		}
@@ -203,9 +226,4 @@ func (y *ydbDatastore) HeadRevision(_ context.Context) (datastore.Revision, erro
 
 	now := truetime.UnixNano()
 	return revisions.NewForTimestamp(now), nil
-}
-
-func (y *ydbDatastore) Watch(ctx context.Context, afterRevision datastore.Revision, options datastore.WatchOptions) (<-chan *datastore.RevisionChanges, <-chan error) {
-	// TODO implement me
-	panic("implement me")
 }

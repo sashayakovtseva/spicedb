@@ -9,6 +9,7 @@ import (
 	"github.com/jzelinskie/stringz"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
@@ -16,10 +17,13 @@ import (
 	"github.com/authzed/spicedb/internal/datastore/revisions"
 	ydbCommon "github.com/authzed/spicedb/internal/datastore/ydb/common"
 	"github.com/authzed/spicedb/pkg/datastore"
+	"github.com/authzed/spicedb/pkg/datastore/options"
 	core "github.com/authzed/spicedb/pkg/proto/core/v1"
 	"github.com/authzed/spicedb/pkg/spiceerrors"
 	"github.com/authzed/spicedb/pkg/tuple"
 )
+
+var _ datastore.ReadWriteTransaction = (*ydbReadWriter)(nil)
 
 type ydbReadWriter struct {
 	*ydbReader
@@ -165,7 +169,16 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 }
 
 // DeleteRelationships deletes all Relationships that match the provided filter.
-func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.RelationshipFilter) error {
+func (rw *ydbReadWriter) DeleteRelationships(
+	ctx context.Context,
+	filter *v1.RelationshipFilter,
+	opts ...options.DeleteOptionsOption,
+) (bool, error) {
+	delOpts := options.NewDeleteOptionsWithOptionsAndDefaults(opts...)
+	if delOpts.DeleteLimit != nil && *delOpts.DeleteLimit > 0 {
+		return false, fmt.Errorf("limit is currently not supported")
+	}
+
 	pred := sq.Eq{
 		colNamespace: filter.GetResourceType(),
 	}
@@ -195,10 +208,10 @@ func (rw *ydbReadWriter) DeleteRelationships(ctx context.Context, filter *v1.Rel
 		rw.newRevision,
 		pred,
 	); err != nil {
-		return fmt.Errorf("failed to delete relations: %w", err)
+		return false, fmt.Errorf("failed to delete relations: %w", err)
 	}
 
-	return nil
+	return false, nil
 }
 
 // WriteNamespaces takes proto namespace definitions and persists them.
@@ -302,7 +315,8 @@ func (rw *ydbReadWriter) selectTuples(
 	ctx context.Context,
 	in []*core.RelationTuple,
 ) ([]*core.RelationTuple, error) {
-	span := trace.SpanFromContext(ctx)
+	ctx, span := tracer.Start(ctx, "selectTuples", trace.WithAttributes(attribute.Int("count", len(in))))
+	defer span.End()
 
 	if len(in) == 0 {
 		return nil, nil
@@ -339,6 +353,9 @@ func writeDefinitions[T coreDefinition](
 	defs []T,
 	useVT bool,
 ) error {
+	ctx, span := tracer.Start(ctx, "writeDefinitions", trace.WithAttributes(attribute.Int("count", len(defs))))
+	defer span.End()
+
 	if len(defs) == 0 {
 		return nil
 	}

@@ -51,18 +51,19 @@ func (c *Config) ToOption() ConfigOption {
 		to.RequestHedgingMaxRequests = c.RequestHedgingMaxRequests
 		to.RequestHedgingQuantile = c.RequestHedgingQuantile
 		to.FollowerReadDelay = c.FollowerReadDelay
+		to.GCInterval = c.GCInterval
+		to.GCMaxOperationTime = c.GCMaxOperationTime
+		to.TablePrefix = c.TablePrefix
 		to.MaxRetries = c.MaxRetries
 		to.OverlapKey = c.OverlapKey
 		to.OverlapStrategy = c.OverlapStrategy
 		to.EnableConnectionBalancing = c.EnableConnectionBalancing
 		to.ConnectRate = c.ConnectRate
-		to.GCInterval = c.GCInterval
-		to.GCMaxOperationTime = c.GCMaxOperationTime
 		to.SpannerCredentialsFile = c.SpannerCredentialsFile
 		to.SpannerEmulatorHost = c.SpannerEmulatorHost
 		to.SpannerMinSessions = c.SpannerMinSessions
 		to.SpannerMaxSessions = c.SpannerMaxSessions
-		to.TablePrefix = c.TablePrefix
+		to.YDBBulkLoadBatchSize = c.YDBBulkLoadBatchSize
 		to.WatchBufferLength = c.WatchBufferLength
 		to.WatchBufferWriteTimeout = c.WatchBufferWriteTimeout
 		to.MigrationPhase = c.MigrationPhase
@@ -92,18 +93,19 @@ func (c Config) DebugMap() map[string]any {
 	debugMap["RequestHedgingMaxRequests"] = helpers.DebugValue(c.RequestHedgingMaxRequests, false)
 	debugMap["RequestHedgingQuantile"] = helpers.DebugValue(c.RequestHedgingQuantile, false)
 	debugMap["FollowerReadDelay"] = helpers.DebugValue(c.FollowerReadDelay, false)
+	debugMap["GCInterval"] = helpers.DebugValue(c.GCInterval, false)
+	debugMap["GCMaxOperationTime"] = helpers.DebugValue(c.GCMaxOperationTime, false)
+	debugMap["TablePrefix"] = helpers.DebugValue(c.TablePrefix, false)
 	debugMap["MaxRetries"] = helpers.DebugValue(c.MaxRetries, false)
 	debugMap["OverlapKey"] = helpers.DebugValue(c.OverlapKey, false)
 	debugMap["OverlapStrategy"] = helpers.DebugValue(c.OverlapStrategy, false)
 	debugMap["EnableConnectionBalancing"] = helpers.DebugValue(c.EnableConnectionBalancing, false)
 	debugMap["ConnectRate"] = helpers.DebugValue(c.ConnectRate, false)
-	debugMap["GCInterval"] = helpers.DebugValue(c.GCInterval, false)
-	debugMap["GCMaxOperationTime"] = helpers.DebugValue(c.GCMaxOperationTime, false)
 	debugMap["SpannerCredentialsFile"] = helpers.DebugValue(c.SpannerCredentialsFile, false)
 	debugMap["SpannerEmulatorHost"] = helpers.DebugValue(c.SpannerEmulatorHost, false)
 	debugMap["SpannerMinSessions"] = helpers.DebugValue(c.SpannerMinSessions, false)
 	debugMap["SpannerMaxSessions"] = helpers.DebugValue(c.SpannerMaxSessions, false)
-	debugMap["TablePrefix"] = helpers.DebugValue(c.TablePrefix, false)
+	debugMap["YDBBulkLoadBatchSize"] = helpers.DebugValue(c.YDBBulkLoadBatchSize, false)
 	debugMap["WatchBufferLength"] = helpers.DebugValue(c.WatchBufferLength, false)
 	debugMap["WatchBufferWriteTimeout"] = helpers.DebugValue(c.WatchBufferWriteTimeout, false)
 	debugMap["MigrationPhase"] = helpers.DebugValue(c.MigrationPhase, false)
@@ -280,6 +282,27 @@ func WithFollowerReadDelay(followerReadDelay time.Duration) ConfigOption {
 	}
 }
 
+// WithGCInterval returns an option that can set GCInterval on a Config
+func WithGCInterval(gCInterval time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.GCInterval = gCInterval
+	}
+}
+
+// WithGCMaxOperationTime returns an option that can set GCMaxOperationTime on a Config
+func WithGCMaxOperationTime(gCMaxOperationTime time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.GCMaxOperationTime = gCMaxOperationTime
+	}
+}
+
+// WithTablePrefix returns an option that can set TablePrefix on a Config
+func WithTablePrefix(tablePrefix string) ConfigOption {
+	return func(c *Config) {
+		c.TablePrefix = tablePrefix
+	}
+}
+
 // WithMaxRetries returns an option that can set MaxRetries on a Config
 func WithMaxRetries(maxRetries int) ConfigOption {
 	return func(c *Config) {
@@ -315,20 +338,6 @@ func WithConnectRate(connectRate time.Duration) ConfigOption {
 	}
 }
 
-// WithGCInterval returns an option that can set GCInterval on a Config
-func WithGCInterval(gCInterval time.Duration) ConfigOption {
-	return func(c *Config) {
-		c.GCInterval = gCInterval
-	}
-}
-
-// WithGCMaxOperationTime returns an option that can set GCMaxOperationTime on a Config
-func WithGCMaxOperationTime(gCMaxOperationTime time.Duration) ConfigOption {
-	return func(c *Config) {
-		c.GCMaxOperationTime = gCMaxOperationTime
-	}
-}
-
 // WithSpannerCredentialsFile returns an option that can set SpannerCredentialsFile on a Config
 func WithSpannerCredentialsFile(spannerCredentialsFile string) ConfigOption {
 	return func(c *Config) {
@@ -357,10 +366,10 @@ func WithSpannerMaxSessions(spannerMaxSessions uint64) ConfigOption {
 	}
 }
 
-// WithTablePrefix returns an option that can set TablePrefix on a Config
-func WithTablePrefix(tablePrefix string) ConfigOption {
+// WithYDBBulkLoadBatchSize returns an option that can set YDBBulkLoadBatchSize on a Config
+func WithYDBBulkLoadBatchSize(yDBBulkLoadBatchSize int) ConfigOption {
 	return func(c *Config) {
-		c.TablePrefix = tablePrefix
+		c.YDBBulkLoadBatchSize = yDBBulkLoadBatchSize
 	}
 }
 

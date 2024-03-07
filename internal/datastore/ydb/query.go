@@ -22,6 +22,8 @@ import (
 )
 
 const (
+	changefeedSpicedbWatch = "spicedb_watch"
+
 	// common
 	colCreatedAtUnixNano = "created_at_unix_nano"
 	colDeletedAtUnixNano = "deleted_at_unix_nano"
@@ -144,6 +146,22 @@ func (se sessionQueryExecutor) Execute(
 	return res, err
 }
 
+// txQueryExecutor implements queryExecutor for YDB transactional actor.
+// This is a convenient wrapper to add custom options for all queries.
+type txQueryExecutor struct {
+	tx table.TransactionActor
+}
+
+func (t txQueryExecutor) Execute(
+	ctx context.Context,
+	query string,
+	params *table.QueryParameters,
+	opts ...options.ExecuteDataQueryOption,
+) (result.Result, error) {
+	opts = append(opts, options.WithKeepInCache(true))
+	return t.tx.Execute(ctx, query, params, opts...)
+}
+
 func queryRow(
 	ctx context.Context,
 	executor queryExecutor,
@@ -165,7 +183,7 @@ func queryRow(
 		return err
 	}
 	if !res.NextRow() {
-		return fmt.Errorf("no unique id rows")
+		return fmt.Errorf("no rows in result set")
 	}
 	if err := res.Scan(values...); err != nil {
 		return err
@@ -277,6 +295,9 @@ func executeDeleteQuery(
 	deleteRev revisions.TimestampRevision,
 	pred sq.Sqlizer,
 ) error {
+	ctx, span := tracer.Start(ctx, "executeDeleteQuery")
+	defer span.End()
+
 	return executeQuery(
 		ctx,
 		tablePathPrefix,
@@ -287,6 +308,9 @@ func executeDeleteQuery(
 
 // executeQuery is a helper for queries that don't care about result set.
 func executeQuery(ctx context.Context, tablePathPrefix string, executor queryExecutor, q sq.Yqliser) error {
+	ctx, span := tracer.Start(ctx, "executeQuery")
+	defer span.End()
+
 	sql, args, err := q.ToYQL()
 	if err != nil {
 		return fmt.Errorf("failed to build query: %w", err)

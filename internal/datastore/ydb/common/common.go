@@ -53,5 +53,4 @@ func AddTablePrefix(query string, tablePathPrefix string) string {
 	buffer.WriteString(query)
 
 	return buffer.String()
-
 }

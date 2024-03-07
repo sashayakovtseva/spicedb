@@ -74,6 +74,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/ydb-platform/ydb-go-genproto v0.0.0-20240126124512-dbb0e1720dbf
 	github.com/ydb-platform/ydb-go-sdk-otel v0.4.6
+	github.com/ydb-platform/ydb-go-sdk-prometheus v0.12.1
 	github.com/ydb-platform/ydb-go-sdk-zerolog v0.14.0
 	github.com/ydb-platform/ydb-go-sdk/v3 v3.56.1
 	go.opencensus.io v0.24.0
@@ -322,6 +323,7 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	github.com/xen0n/gosmopolitan v1.2.2 // indirect
 	github.com/yagipy/maintidx v1.0.0 // indirect
+	github.com/ydb-platform/ydb-go-sdk-metrics v0.16.4 // indirect
 	github.com/yeya24/promlinter v0.2.0 // indirect
 	github.com/ykadowak/zerologlint v0.1.3 // indirect
 	gitlab.com/bosi/decorder v0.4.1 // indirect
