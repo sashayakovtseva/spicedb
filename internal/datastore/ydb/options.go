@@ -6,6 +6,7 @@ import (
 
 type ydbConfig struct {
 	tablePathPrefix string
+	certificatePath string
 
 	watchBufferLength       uint16
 	watchBufferWriteTimeout time.Duration
@@ -25,10 +26,8 @@ type ydbConfig struct {
 }
 
 var defaultConfig = ydbConfig{
-	tablePathPrefix:             "",
 	watchBufferLength:           128,
 	watchBufferWriteTimeout:     time.Second,
-	followerReadDelay:           0 * time.Second,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
 	gcWindow:                    24 * time.Hour,
@@ -36,7 +35,6 @@ var defaultConfig = ydbConfig{
 	gcMaxOperationTime:          time.Minute,
 	bulkLoadBatchSize:           1000,
 	gcEnabled:                   true,
-	enablePrometheusStats:       false,
 }
 
 // Option provides the facility to configure how clients within the YDB
@@ -59,6 +57,12 @@ func generateConfig(options []Option) *ydbConfig {
 // Non-empty DSN parameter takes precedence over this option.
 func WithTablePathPrefix(prefix string) Option {
 	return func(o *ydbConfig) { o.tablePathPrefix = prefix }
+}
+
+// WithCertificatePath sets a path to the certificate to use when connecting to YDB with grpcs protocol.
+// Default is empty.
+func WithCertificatePath(path string) Option {
+	return func(o *ydbConfig) { o.certificatePath = path }
 }
 
 // GCWindow is the maximum age of a passed revision that will be considered

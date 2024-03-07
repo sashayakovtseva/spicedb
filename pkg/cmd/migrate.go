@@ -27,7 +27,8 @@ func RegisterMigrateFlags(cmd *cobra.Command) {
 	cmd.Flags().String("datastore-conn-uri", "", `connection string used by remote datastores (e.g. "postgres://postgres:password@localhost:5432/spicedb")`)
 	cmd.Flags().String("datastore-spanner-credentials", "", "path to service account key credentials file with access to the cloud spanner instance (omit to use application default credentials)")
 	cmd.Flags().String("datastore-spanner-emulator-host", "", "URI of spanner emulator instance used for development and testing (e.g. localhost:9010)")
-	cmd.Flags().String("datastore-mysql-table-prefix", "", "prefix to add to the name of all mysql database tables")
+	cmd.Flags().String("datastore-table-prefix", "", "prefix to add to the name of all SpiceDB database tables (mysql and ydb driver only)")
+	cmd.Flags().String("datastore-certificate-path", "", "filepath to a valid certificate used to connect to a datastore (ydb driver only)")
 	cmd.Flags().Uint64("migration-backfill-batch-size", 1000, "number of items to migrate per iteration of a datastore backfill")
 	cmd.Flags().Duration("migration-timeout", 1*time.Hour, "defines a timeout for the execution of the migration, set to 1 hour by default")
 }
@@ -48,6 +49,8 @@ func migrateRun(cmd *cobra.Command, args []string) error {
 	dbURL := cobrautil.MustGetStringExpanded(cmd, "datastore-conn-uri")
 	timeout := cobrautil.MustGetDuration(cmd, "migration-timeout")
 	migrationBatachSize := cobrautil.MustGetUint64(cmd, "migration-backfill-batch-size")
+	tablePrefix := cobrautil.MustGetString(cmd, "datastore-table-prefix")
+	certificatePath := cobrautil.MustGetString(cmd, "datastore-certificate-path")
 
 	if datastoreEngine == "cockroachdb" {
 		log.Ctx(cmd.Context()).Info().Msg("migrating cockroachdb datastore")
@@ -84,12 +87,6 @@ func migrateRun(cmd *cobra.Command, args []string) error {
 	} else if datastoreEngine == "mysql" {
 		log.Ctx(cmd.Context()).Info().Msg("migrating mysql datastore")
 
-		var err error
-		tablePrefix, err := cmd.Flags().GetString("datastore-mysql-table-prefix")
-		if err != nil {
-			log.Ctx(cmd.Context()).Fatal().Msg(fmt.Sprintf("unable to get table prefix: %s", err))
-		}
-
 		migrationDriver, err := mysqlmigrations.NewMySQLDriverFromDSN(dbURL, tablePrefix)
 		if err != nil {
 			return fmt.Errorf("unable to create migration driver for %s: %w", datastoreEngine, err)
@@ -98,7 +95,12 @@ func migrateRun(cmd *cobra.Command, args []string) error {
 	} else if datastoreEngine == ydb.Engine {
 		log.Ctx(cmd.Context()).Info().Msg("migrating ydb datastore")
 
-		migrationDriver, err := ydbMigrations.NewYDBDriver(cmd.Context(), dbURL)
+		migrationDriver, err := ydbMigrations.NewYDBDriver(
+			cmd.Context(),
+			dbURL,
+			ydbMigrations.WithTablePathPrefix(tablePrefix),
+			ydbMigrations.WithCertificatePath(certificatePath),
+		)
 		if err != nil {
 			return fmt.Errorf("unable to create migration driver for %s: %w", datastoreEngine, err)
 		}

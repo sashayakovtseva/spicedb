@@ -134,17 +134,17 @@ WITH (
 )
 
 func init() {
-	err := YDBMigrations.Register("initial", "", func(ctx context.Context, client TableClientWithOptions) error {
+	err := YDBMigrations.Register("initial", "", func(ctx context.Context, client TableClientWithConfig) error {
 		return client.client.Do(ctx, func(ctx context.Context, s table.Session) error {
 			statements := []string{
-				common.AddTablePrefix(createSchemaVersion, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createUniqueIDTable, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createNamespaceConfig, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createCaveat, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createRelationTuple, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createNamespaceConfigChangefeed, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createCaveatChangefeed, client.opts.tablePathPrefix),
-				common.AddTablePrefix(createRelationTupleChangefeed, client.opts.tablePathPrefix),
+				common.AddTablePrefix(createSchemaVersion, client.config.tablePathPrefix),
+				common.AddTablePrefix(createUniqueIDTable, client.config.tablePathPrefix),
+				common.AddTablePrefix(createNamespaceConfig, client.config.tablePathPrefix),
+				common.AddTablePrefix(createCaveat, client.config.tablePathPrefix),
+				common.AddTablePrefix(createRelationTuple, client.config.tablePathPrefix),
+				common.AddTablePrefix(createNamespaceConfigChangefeed, client.config.tablePathPrefix),
+				common.AddTablePrefix(createCaveatChangefeed, client.config.tablePathPrefix),
+				common.AddTablePrefix(createRelationTupleChangefeed, client.config.tablePathPrefix),
 			}
 			for _, stmt := range statements {
 				if err := s.ExecuteSchemeQuery(ctx, stmt); err != nil {
@@ -154,10 +154,10 @@ func init() {
 
 			return nil
 		})
-	}, func(ctx context.Context, tx TxActorWithOptions) error {
+	}, func(ctx context.Context, tx TxActorWithConfig) error {
 		_, err := tx.tx.Execute(
 			ctx,
-			common.AddTablePrefix(insertUniqueID, tx.opts.tablePathPrefix),
+			common.AddTablePrefix(insertUniqueID, tx.config.tablePathPrefix),
 			&table.QueryParameters{},
 		)
 		return err
