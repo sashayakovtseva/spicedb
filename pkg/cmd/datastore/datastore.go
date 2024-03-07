@@ -141,7 +141,8 @@ type Config struct {
 	SpannerMaxSessions     uint64 `debugmap:"visible"`
 
 	// YDB
-	YDBBulkLoadBatchSize int `debugmap:"visible"`
+	YDBCertificatePath   string `debugmap:"visible"`
+	YDBBulkLoadBatchSize int    `debugmap:"visible"`
 
 	// Internal
 	WatchBufferLength       uint16        `debugmap:"visible"`
@@ -214,11 +215,12 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	flagSet.StringVar(&opts.SpannerEmulatorHost, flagName("datastore-spanner-emulator-host"), "", "URI of spanner emulator instance used for development and testing (e.g. localhost:9010)")
 	flagSet.Uint64Var(&opts.SpannerMinSessions, flagName("datastore-spanner-min-sessions"), 100, "minimum number of sessions across all Spanner gRPC connections the client can have at a given time")
 	flagSet.Uint64Var(&opts.SpannerMaxSessions, flagName("datastore-spanner-max-sessions"), 400, "maximum number of sessions across all Spanner gRPC connections the client can have at a given time")
-	flagSet.StringVar(&opts.TablePrefix, flagName("datastore-mysql-table-prefix"), defaults.TablePrefix, "prefix to add to the name of all SpiceDB database tables (mysql and ydb driver only)")
+	flagSet.StringVar(&opts.TablePrefix, flagName("datastore-table-prefix"), defaults.TablePrefix, "prefix to add to the name of all SpiceDB database tables (mysql and ydb driver only)")
 	flagSet.StringVar(&opts.MigrationPhase, flagName("datastore-migration-phase"), "", "datastore-specific flag that should be used to signal to a datastore which phase of a multi-step migration it is in (postgres and spanner driver only)")
 	flagSet.Uint16Var(&opts.WatchBufferLength, flagName("datastore-watch-buffer-length"), defaults.WatchBufferLength, "how large the watch buffer should be before blocking")
 	flagSet.DurationVar(&opts.WatchBufferWriteTimeout, flagName("datastore-watch-buffer-write-timeout"), defaults.WatchBufferWriteTimeout, "how long the watch buffer should queue before forcefully disconnecting the reader")
 	flagSet.IntVar(&opts.YDBBulkLoadBatchSize, flagName("datastore-bulk-load-size"), defaults.YDBBulkLoadBatchSize, "number of rows BulkLoad will process in a single batch (ydb driver only)")
+	flagSet.StringVar(&opts.YDBCertificatePath, flagName("datastore-certificate-path"), defaults.YDBCertificatePath, "filepath to a valid certificate used to connect to a datastore (ydb driver only)")
 
 	// disabling stats is only for tests
 	flagSet.BoolVar(&opts.DisableStats, flagName("datastore-disable-stats"), false, "disable recording relationship counts to the stats table")
@@ -439,6 +441,7 @@ func newYDBDatastore(ctx context.Context, config Config) (datastore.Datastore, e
 		ydb.WatchBufferWriteTimeout(config.WatchBufferWriteTimeout),
 		ydb.BulkLoadBatchSize(config.YDBBulkLoadBatchSize),
 		ydb.WithEnablePrometheusStats(config.EnableDatastoreMetrics),
+		ydb.WithCertificatePath(config.YDBCertificatePath),
 	}
 	return ydb.NewYDBDatastore(ctx, config.URI, opts...)
 }

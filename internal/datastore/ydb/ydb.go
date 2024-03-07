@@ -81,6 +81,9 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 	if config.enablePrometheusStats {
 		ydbOpts = append(ydbOpts, ydbPrometheus.WithTraces(prometheus.DefaultRegisterer))
 	}
+	if config.certificatePath != "" {
+		ydbOpts = append(ydbOpts, ydb.WithCertificatesFromFile(config.certificatePath))
+	}
 
 	db, err := ydb.Open(ctx, parsedDSN.OriginalDSN, ydbOpts...)
 	if err != nil {
