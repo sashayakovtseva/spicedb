@@ -3,6 +3,7 @@ package ydb
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 	ydbPrometheus "github.com/ydb-platform/ydb-go-sdk-prometheus"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	ydbLog "github.com/ydb-platform/ydb-go-sdk/v3/log"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"go.opentelemetry.io/otel"
@@ -77,6 +79,7 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 	ydbOpts := []ydb.Option{
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydbOtel.WithTraces(),
+		ydb.WithLogger(ydbLog.Default(os.Stderr, ydbLog.WithMinLevel(ydbLog.TRACE)), trace.DetailsAll),
 	}
 	if config.enablePrometheusStats {
 		ydbOpts = append(ydbOpts, ydbPrometheus.WithTraces(prometheus.DefaultRegisterer))
@@ -90,7 +93,7 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		return nil, fmt.Errorf("failed to open YDB connection: %w", err)
 	}
 
-	if _, err := db.Scheme().ListDirectory(ctx, config.tablePathPrefix); err != nil {
+	if _, err := db.Scheme().ListDirectory(ctx, db.Name()); err != nil {
 		return nil, fmt.Errorf("failed to ping YDB: %w", err)
 	}
 
