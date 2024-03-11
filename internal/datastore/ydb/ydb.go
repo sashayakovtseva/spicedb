@@ -90,7 +90,7 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		return nil, fmt.Errorf("failed to open YDB connection: %w", err)
 	}
 
-	if _, err := db.Scheme().ListDirectory(ctx, config.tablePathPrefix); err != nil {
+	if _, err := db.Scheme().ListDirectory(ctx, db.Name()); err != nil {
 		return nil, fmt.Errorf("failed to ping YDB: %w", err)
 	}
 
