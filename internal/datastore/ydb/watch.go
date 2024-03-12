@@ -116,9 +116,9 @@ func (y *ydbDatastore) watch(
 	readFromTime := afterTimestampRevision.Time()
 
 	tableToTopicName := map[string]string{
-		tableRelationTuple:   y.config.tablePathPrefix + "/" + tableRelationTuple + "/" + changefeedSpicedbWatch,
-		tableCaveat:          y.config.tablePathPrefix + "/" + tableCaveat + "/" + changefeedSpicedbWatch,
-		tableNamespaceConfig: y.config.tablePathPrefix + "/" + tableNamespaceConfig + "/" + changefeedSpicedbWatch,
+		tableRelationTuple:   watchTopicName(y.config.tablePathPrefix, tableRelationTuple),
+		tableCaveat:          watchTopicName(y.config.tablePathPrefix, tableCaveat),
+		tableNamespaceConfig: watchTopicName(y.config.tablePathPrefix, tableNamespaceConfig),
 	}
 	topicToTableName := lo.Invert(tableToTopicName)
 
@@ -426,4 +426,12 @@ func (y *ydbDatastore) watch(
 			errs <- rErr
 		}
 	}
+}
+
+func watchTopicName(tablePathPrefix string, tableName string) string {
+	topicName := tableName + "/" + changefeedSpicedbWatch
+	if tablePathPrefix == "" {
+		return topicName
+	}
+	return tablePathPrefix + "/" + topicName
 }
