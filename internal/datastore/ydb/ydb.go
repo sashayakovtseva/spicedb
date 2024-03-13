@@ -140,7 +140,12 @@ func (y *ydbDatastore) ReadyState(ctx context.Context) (datastore.ReadyState, er
 		return datastore.ReadyState{}, fmt.Errorf("invalid head migration found for YDB: %w", err)
 	}
 
-	ydbDriver, err := migrations.NewYDBDriver(ctx, y.originalDSN)
+	ydbDriver, err := migrations.NewYDBDriver(
+		ctx,
+		y.originalDSN,
+		migrations.WithTablePathPrefix(y.config.tablePathPrefix),
+		migrations.WithCertificatePath(y.config.certificatePath),
+	)
 	if err != nil {
 		return datastore.ReadyState{}, err
 	}
