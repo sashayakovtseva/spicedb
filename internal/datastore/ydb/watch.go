@@ -54,8 +54,11 @@ func (y *ydbDatastore) Watch(
 }
 
 type cdcEvent struct {
-	Key      []cdcKeyElement
-	NewImage json.RawMessage
+	Resolved []int64 `json:"resolved"`
+	Ts       []int64 `json:"ts"`
+
+	Key      []cdcKeyElement `json:"key"`
+	NewImage json.RawMessage `json:"newImage"`
 }
 
 type cdcKeyElement struct {
@@ -222,21 +225,14 @@ func (y *ydbDatastore) watch(
 		return
 	}
 
-	// WARNING! This is for test purpose only and only for namespace-aware schema watch!
-	// todo Fix this when 'resolved'-like messages are supported.
-	const expectedChangesCount = 4
-
 	var (
 		rErr    error
 		msg     *topicreader.Message
-		event   cdcEvent
 		tracked = common.NewChanges(revisions.TimestampIDKeyFunc, opts.Content)
-
-		changesCount    int
-		changesRevision revisions.TimestampRevision
 	)
 
 	for msg, rErr = reader.ReadMessage(ctx); rErr == nil; msg, rErr = reader.ReadMessage(ctx) {
+		var event cdcEvent
 		if err := topicsugar.JSONUnmarshal(msg, &event); err != nil {
 			sendError(fmt.Errorf("failed to unmarshal cdc event: %w", err))
 			return
@@ -254,6 +250,41 @@ func (y *ydbDatastore) watch(
 			Any("metadata", msg.Metadata).
 			Any("event", event).
 			Msg("got new YDB CDC event")
+
+		// Resolved indicates that the specified revision is "complete";
+		// no additional updates can come in before or at it.
+		// Therefore, at this point, we issue tracked updates from before that time, and the checkpoint update.
+		if len(event.Resolved) > 0 {
+			// todo find out why caveat cdc is received more rare than ns.
+			if topicToTableName[msg.Topic()] != tableNamespaceConfig {
+				continue
+			}
+
+			// todo received resolved timestamp is out of sync with with created_at_unix_nano column!
+			//  it is okay to use it for tests now, but as a general case we must sync them somehow.
+			rev := revisions.NewForTimestamp((time.Duration(event.Resolved[0]) * time.Millisecond).Nanoseconds())
+			changes := tracked.FilterAndRemoveRevisionChanges(revisions.TimestampIDKeyLessThanFunc, rev)
+			for i := range changes {
+				if !sendChange(&changes[i]) {
+					return
+				}
+			}
+
+			if opts.Content&datastore.WatchCheckpoints == datastore.WatchCheckpoints {
+				if !sendChange(&datastore.RevisionChanges{
+					Revision:     rev,
+					IsCheckpoint: true,
+				}) {
+					return
+				}
+			}
+
+			if err := reader.Commit(ctx, msg); err != nil {
+				sendError(fmt.Errorf("failed to commit offset: %w", err))
+				return
+			}
+			continue
+		}
 
 		switch topicToTableName[msg.Topic()] {
 		case tableRelationTuple:
@@ -336,8 +367,6 @@ func (y *ydbDatastore) watch(
 				sendError(fmt.Errorf("failed to unmarshal namespace new image: %w", err))
 				return
 			}
-			changesCount++
-			changesRevision = createRev
 
 			if changes.DeletedAtUnixNano != nil {
 				deleteRev := revisions.NewForTimestamp(*changes.DeletedAtUnixNano)
@@ -388,28 +417,6 @@ func (y *ydbDatastore) watch(
 		if err := reader.Commit(ctx, msg); err != nil {
 			sendError(fmt.Errorf("failed to commit offset: %w", err))
 			return
-		}
-
-		if changesCount == expectedChangesCount {
-			changes := tracked.AsRevisionChanges(revisions.TimestampIDKeyLessThanFunc)
-			for i := range changes {
-				if !sendChange(&changes[i]) {
-					return
-				}
-			}
-
-			if opts.Content&datastore.WatchCheckpoints == datastore.WatchCheckpoints {
-				if !sendChange(&datastore.RevisionChanges{
-					Revision:     changesRevision,
-					IsCheckpoint: true,
-				}) {
-					return
-				}
-			}
-
-			changesCount = 0
-			changesRevision = 0
-			tracked = common.NewChanges(revisions.TimestampIDKeyFunc, opts.Content)
 		}
 	}
 
