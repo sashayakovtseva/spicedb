@@ -100,6 +100,20 @@ var (
 		colCaveatContext,
 		colCreatedAtUnixNano,
 	)
+
+	insertAsTableRelationsYQL, _ = yq.Insert(tableRelationTuple).Select(
+		yq.Select(
+			colNamespace,
+			colObjectID,
+			colRelation,
+			colUsersetNamespace,
+			colUsersetObjectID,
+			colUsersetRelation,
+			colCaveatName,
+			colCaveatContext,
+			colCreatedAtUnixNano,
+		).From("AS_TABLE($values)"),
+	).MustSql()
 )
 
 type queryModifier func(sq.SelectBuilder) sq.SelectBuilder

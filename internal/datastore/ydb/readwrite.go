@@ -62,11 +62,9 @@ func (rw *ydbReadWriter) DeleteCaveats(ctx context.Context, names []string) erro
 
 // WriteRelationships takes a list of tuple mutations and applies them to the datastore.
 func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*core.RelationTupleUpdate) error {
-	insertBuilder := insertRelationsBuilder
 	deleteBuilder := deleteRelationBuilder
 
 	var (
-		err             error
 		insertionTuples []*core.RelationTuple
 		touchTuples     []*core.RelationTuple
 
@@ -80,10 +78,6 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 		switch mut.GetOperation() {
 		case core.RelationTupleUpdate_CREATE:
 			insertionTuples = append(insertionTuples, tpl)
-			insertBuilder, err = appendForInsertion(insertBuilder, tpl, rw.newRevision)
-			if err != nil {
-				return fmt.Errorf("failed to append tuple for insertion: %w", err)
-			}
 
 		case core.RelationTupleUpdate_TOUCH:
 			touchTuples = append(touchTuples, tpl)
@@ -121,10 +115,6 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 			pk := tuple.StringWithoutCaveat(touchTuples[i])
 			dup, ok := duplicatePKToRel[pk]
 			if !ok {
-				insertBuilder, err = appendForInsertion(insertBuilder, touchTuples[i], rw.newRevision)
-				if err != nil {
-					return fmt.Errorf("failed to append tuple for insertion: %w", err)
-				}
 				i++
 				continue
 			}
@@ -136,10 +126,6 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 			}
 
 			deleteClauses = append(deleteClauses, exactRelationshipClause(dup))
-			insertBuilder, err = appendForInsertion(insertBuilder, touchTuples[i], rw.newRevision)
-			if err != nil {
-				return fmt.Errorf("failed to append tuple for insertion: %w", err)
-			}
 			i++
 		}
 	}
@@ -160,9 +146,18 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 
 	// Run CREATE and TOUCH insertions, if any.
 	if len(insertionTuples) > 0 || len(touchTuples) > 0 {
-		if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
+		in := append(insertionTuples, touchTuples...)
+		query := ydbCommon.AddTablePrefix(insertAsTableRelationsYQL, rw.tablePathPrefix)
+
+		res, err := rw.executor.Execute(
+			ctx,
+			query,
+			table.NewQueryParameters(table.ValueParam("$values", relationsToListValue(in, rw.newRevision))),
+		)
+		if err != nil {
 			return fmt.Errorf("failed to insert tuples: %w", err)
 		}
+		defer res.Close()
 	}
 
 	return nil
@@ -439,6 +434,35 @@ func appendForInsertion(
 	}
 
 	return b.Values(valuesToWrite...), nil
+}
+
+func relationsToListValue(in []*core.RelationTuple, rev revisions.TimestampRevision) types.Value {
+	out := make([]types.Value, len(in))
+	for i := range in {
+		var caveatName *string
+		var caveatContext *[]byte
+		if in[i].GetCaveat() != nil {
+			caveatName = &in[i].GetCaveat().CaveatName
+			cc, err := in[i].GetCaveat().GetContext().MarshalJSON()
+			if err != nil {
+				panic(err)
+			}
+			caveatContext = &cc
+		}
+
+		out[i] = types.StructValue(
+			types.StructFieldValue(colNamespace, types.UTF8Value(in[i].GetResourceAndRelation().GetNamespace())),
+			types.StructFieldValue(colObjectID, types.UTF8Value(in[i].GetResourceAndRelation().GetObjectId())),
+			types.StructFieldValue(colRelation, types.UTF8Value(in[i].GetResourceAndRelation().GetRelation())),
+			types.StructFieldValue(colUsersetNamespace, types.UTF8Value(in[i].GetSubject().GetNamespace())),
+			types.StructFieldValue(colUsersetObjectID, types.UTF8Value(in[i].GetSubject().GetObjectId())),
+			types.StructFieldValue(colUsersetRelation, types.UTF8Value(in[i].GetSubject().GetRelation())),
+			types.StructFieldValue(colCaveatName, types.NullableUTF8Value(caveatName)),
+			types.StructFieldValue(colCaveatContext, types.NullableJSONDocumentValueFromBytes(caveatContext)),
+			types.StructFieldValue(colCreatedAtUnixNano, types.Int64Value(rev.TimestampNanoSec())),
+		)
+	}
+	return types.ListValue(out...)
 }
 
 func exactRelationshipClause(r *core.RelationTuple) sq.Eq {
