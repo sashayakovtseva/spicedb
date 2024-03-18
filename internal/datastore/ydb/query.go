@@ -281,7 +281,7 @@ func queryTuples(
 			var structuredCtx map[string]any
 			if caveatCtx != nil {
 				if err := json.Unmarshal(*caveatCtx, &structuredCtx); err != nil {
-					return nil, fmt.Errorf("failed to unmarhsla relation tuple caveat context: %w", err)
+					return nil, fmt.Errorf("failed to unmarshal relation tuple caveat context: %w", err)
 				}
 			}
 
