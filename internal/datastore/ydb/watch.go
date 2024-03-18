@@ -398,9 +398,12 @@ func (y *ydbDatastore) watch(
 				}
 			}
 
+			// WARNING! This is for test purpose only and only for namespace-aware schema watch!
+			// todo Fix this when 'resolved'-like messages are supported.
+			futureCheckpoint := revisions.NewForTime(changesRevision.Time().Add(time.Hour * 24 * 30))
 			if opts.Content&datastore.WatchCheckpoints == datastore.WatchCheckpoints {
 				if !sendChange(&datastore.RevisionChanges{
-					Revision:     changesRevision,
+					Revision:     futureCheckpoint,
 					IsCheckpoint: true,
 				}) {
 					return
