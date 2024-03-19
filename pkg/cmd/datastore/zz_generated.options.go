@@ -65,6 +65,7 @@ func (c *Config) ToOption() ConfigOption {
 		to.SpannerMaxSessions = c.SpannerMaxSessions
 		to.YDBCertificatePath = c.YDBCertificatePath
 		to.YDBBulkLoadBatchSize = c.YDBBulkLoadBatchSize
+		to.YDBEnableUniquenessCheck = c.YDBEnableUniquenessCheck
 		to.WatchBufferLength = c.WatchBufferLength
 		to.WatchBufferWriteTimeout = c.WatchBufferWriteTimeout
 		to.MigrationPhase = c.MigrationPhase
@@ -108,6 +109,7 @@ func (c Config) DebugMap() map[string]any {
 	debugMap["SpannerMaxSessions"] = helpers.DebugValue(c.SpannerMaxSessions, false)
 	debugMap["YDBCertificatePath"] = helpers.DebugValue(c.YDBCertificatePath, false)
 	debugMap["YDBBulkLoadBatchSize"] = helpers.DebugValue(c.YDBBulkLoadBatchSize, false)
+	debugMap["YDBEnableUniquenessCheck"] = helpers.DebugValue(c.YDBEnableUniquenessCheck, false)
 	debugMap["WatchBufferLength"] = helpers.DebugValue(c.WatchBufferLength, false)
 	debugMap["WatchBufferWriteTimeout"] = helpers.DebugValue(c.WatchBufferWriteTimeout, false)
 	debugMap["MigrationPhase"] = helpers.DebugValue(c.MigrationPhase, false)
@@ -379,6 +381,13 @@ func WithYDBCertificatePath(yDBCertificatePath string) ConfigOption {
 func WithYDBBulkLoadBatchSize(yDBBulkLoadBatchSize int) ConfigOption {
 	return func(c *Config) {
 		c.YDBBulkLoadBatchSize = yDBBulkLoadBatchSize
+	}
+}
+
+// WithYDBEnableUniquenessCheck returns an option that can set YDBEnableUniquenessCheck on a Config
+func WithYDBEnableUniquenessCheck(yDBEnableUniquenessCheck bool) ConfigOption {
+	return func(c *Config) {
+		c.YDBEnableUniquenessCheck = yDBEnableUniquenessCheck
 	}
 }
 

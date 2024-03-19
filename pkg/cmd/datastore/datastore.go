@@ -141,8 +141,9 @@ type Config struct {
 	SpannerMaxSessions     uint64 `debugmap:"visible"`
 
 	// YDB
-	YDBCertificatePath   string `debugmap:"visible"`
-	YDBBulkLoadBatchSize int    `debugmap:"visible"`
+	YDBCertificatePath       string `debugmap:"visible"`
+	YDBBulkLoadBatchSize     int    `debugmap:"visible"`
+	YDBEnableUniquenessCheck bool   `debugmap:"visible"`
 
 	// Internal
 	WatchBufferLength       uint16        `debugmap:"visible"`
@@ -221,6 +222,7 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	flagSet.DurationVar(&opts.WatchBufferWriteTimeout, flagName("datastore-watch-buffer-write-timeout"), defaults.WatchBufferWriteTimeout, "how long the watch buffer should queue before forcefully disconnecting the reader")
 	flagSet.IntVar(&opts.YDBBulkLoadBatchSize, flagName("datastore-bulk-load-size"), defaults.YDBBulkLoadBatchSize, "number of rows BulkLoad will process in a single batch (ydb driver only)")
 	flagSet.StringVar(&opts.YDBCertificatePath, flagName("datastore-certificate-path"), defaults.YDBCertificatePath, "filepath to a valid certificate used to connect to a datastore (ydb driver only)")
+	flagSet.BoolVar(&opts.YDBEnableUniquenessCheck, flagName("datastore-ydb-enable-uniqueness-check"), defaults.YDBEnableUniquenessCheck, "whether to check tuples against unique index during CREATE operation (ydb driver only)")
 
 	// disabling stats is only for tests
 	flagSet.BoolVar(&opts.DisableStats, flagName("datastore-disable-stats"), false, "disable recording relationship counts to the stats table")
@@ -275,7 +277,9 @@ func DefaultDatastoreConfig() *Config {
 		SpannerEmulatorHost:            "",
 		SpannerMinSessions:             100,
 		SpannerMaxSessions:             400,
+		YDBCertificatePath:             "",
 		YDBBulkLoadBatchSize:           1000,
+		YDBEnableUniquenessCheck:       true,
 		WatchBufferLength:              1024,
 		WatchBufferWriteTimeout:        1 * time.Second,
 		MigrationPhase:                 "",
@@ -430,7 +434,7 @@ func newPostgresDatastore(ctx context.Context, opts Config) (datastore.Datastore
 func newYDBDatastore(ctx context.Context, config Config) (datastore.Datastore, error) {
 	opts := []ydb.Option{
 		ydb.GCWindow(config.GCWindow),
-		ydb.GCEnabled(!config.ReadOnly),
+		ydb.WithEnableGC(!config.ReadOnly),
 		ydb.RevisionQuantization(config.RevisionQuantization),
 		ydb.MaxRevisionStalenessPercent(config.MaxRevisionStalenessPercent),
 		ydb.FollowerReadDelay(config.FollowerReadDelay),
@@ -442,6 +446,7 @@ func newYDBDatastore(ctx context.Context, config Config) (datastore.Datastore, e
 		ydb.BulkLoadBatchSize(config.YDBBulkLoadBatchSize),
 		ydb.WithEnablePrometheusStats(config.EnableDatastoreMetrics),
 		ydb.WithCertificatePath(config.YDBCertificatePath),
+		ydb.WithEnableUniquenessCheck(config.YDBEnableUniquenessCheck),
 	}
 	return ydb.NewYDBDatastore(ctx, config.URI, opts...)
 }

@@ -215,8 +215,9 @@ func (y *ydbDatastore) ReadWriteTx(
 				livingObjectModifier,
 				false,
 			),
-			bulkLoadBatchSize: y.config.bulkLoadBatchSize,
-			newRevision:       newRev,
+			bulkLoadBatchSize:     y.config.bulkLoadBatchSize,
+			newRevision:           newRev,
+			enableUniquenessCheck: y.config.enableUniquenessCheck,
 		}
 
 		return fn(ctx, rw)

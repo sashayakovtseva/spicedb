@@ -21,8 +21,9 @@ type ydbConfig struct {
 
 	bulkLoadBatchSize int
 
-	gcEnabled             bool
+	enableGC              bool
 	enablePrometheusStats bool
+	enableUniquenessCheck bool
 }
 
 var defaultConfig = ydbConfig{
@@ -34,7 +35,8 @@ var defaultConfig = ydbConfig{
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
 	bulkLoadBatchSize:           1000,
-	gcEnabled:                   true,
+	enableGC:                    true,
+	enableUniquenessCheck:       true,
 }
 
 // Option provides the facility to configure how clients within the YDB
@@ -80,11 +82,11 @@ func GCInterval(interval time.Duration) Option {
 	return func(o *ydbConfig) { o.gcInterval = interval }
 }
 
-// GCEnabled indicates whether garbage collection is enabled.
+// WithEnableGC indicates whether garbage collection is enabled.
 //
 // GC is enabled by default.
-func GCEnabled(isGCEnabled bool) Option {
-	return func(o *ydbConfig) { o.gcEnabled = isGCEnabled }
+func WithEnableGC(isGCEnabled bool) Option {
+	return func(o *ydbConfig) { o.enableGC = isGCEnabled }
 }
 
 // GCMaxOperationTime is the maximum operation time of a garbage collection pass before it times out.
@@ -143,6 +145,13 @@ func WatchBufferWriteTimeout(watchBufferWriteTimeout time.Duration) Option {
 // clients being used by the datastore are enabled.
 //
 // Prometheus metrics are disabled by default.
-func WithEnablePrometheusStats(enablePrometheusStats bool) Option {
-	return func(o *ydbConfig) { o.enablePrometheusStats = enablePrometheusStats }
+func WithEnablePrometheusStats(v bool) Option {
+	return func(o *ydbConfig) { o.enablePrometheusStats = v }
+}
+
+// WithEnableUniquenessCheck marks whether relation tuples will be checked against
+// unique index during CREATE operation. YDB doesn't support unique secondary indexes,
+// and since this check is quite expensive one may turn it off.
+func WithEnableUniquenessCheck(v bool) Option {
+	return func(o *ydbConfig) { o.enableUniquenessCheck = v }
 }

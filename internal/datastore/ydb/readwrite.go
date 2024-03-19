@@ -27,8 +27,9 @@ var _ datastore.ReadWriteTransaction = (*ydbReadWriter)(nil)
 
 type ydbReadWriter struct {
 	*ydbReader
-	bulkLoadBatchSize int
-	newRevision       revisions.TimestampRevision
+	bulkLoadBatchSize     int
+	newRevision           revisions.TimestampRevision
+	enableUniquenessCheck bool
 }
 
 // WriteCaveats stores the provided caveats.
@@ -91,7 +92,7 @@ func (rw *ydbReadWriter) WriteRelationships(ctx context.Context, mutations []*co
 	}
 
 	// Perform SELECT queries first as a part of uniqueness check.
-	if len(insertionTuples) > 0 {
+	if len(insertionTuples) > 0 && rw.enableUniquenessCheck {
 		dups, err := rw.selectTuples(ctx, insertionTuples)
 		if err != nil {
 			return fmt.Errorf("failed to ensure CREATE tuples uniqueness: %w", err)
@@ -284,12 +285,14 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 		}
 
 		if len(insertionTuples) > 0 {
-			dups, err := rw.selectTuples(ctx, insertionTuples)
-			if err != nil {
-				return 0, fmt.Errorf("failed to ensure CREATE tuples uniqueness: %w", err)
-			}
-			if len(dups) > 0 {
-				return 0, datastoreCommon.NewCreateRelationshipExistsError(dups[0])
+			if rw.enableUniquenessCheck {
+				dups, err := rw.selectTuples(ctx, insertionTuples)
+				if err != nil {
+					return 0, fmt.Errorf("failed to ensure CREATE tuples uniqueness: %w", err)
+				}
+				if len(dups) > 0 {
+					return 0, datastoreCommon.NewCreateRelationshipExistsError(dups[0])
+				}
 			}
 
 			if err := executeQuery(ctx, rw.tablePathPrefix, rw.executor, insertBuilder); err != nil {
