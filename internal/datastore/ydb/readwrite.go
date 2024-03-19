@@ -309,10 +309,7 @@ func (rw *ydbReadWriter) BulkLoad(ctx context.Context, iter datastore.BulkWriteR
 	return uint64(totalCount), nil
 }
 
-func (rw *ydbReadWriter) selectTuples(
-	ctx context.Context,
-	in []*core.RelationTuple,
-) ([]*core.RelationTuple, error) {
+func (rw *ydbReadWriter) selectTuples(ctx context.Context, in []*core.RelationTuple) ([]*core.RelationTuple, error) {
 	ctx, span := tracer.Start(ctx, "selectTuples", trace.WithAttributes(attribute.Int("count", len(in))))
 	defer span.End()
 
@@ -320,17 +317,14 @@ func (rw *ydbReadWriter) selectTuples(
 		return nil, nil
 	}
 
-	var pred sq.Or
-	for _, r := range in {
-		pred = append(pred, exactRelationshipClause(r))
-	}
-
-	sql, args, err := rw.modifier(readRelationBuilder).View(ixUqRelationLiving).Where(pred).ToYQL()
-	if err != nil {
-		return nil, fmt.Errorf("failed to build query: %w", err)
-	}
-
-	return queryTuples(ctx, rw.tablePathPrefix, sql, table.NewQueryParameters(args...), span, rw.executor)
+	return queryTuples(
+		ctx,
+		rw.tablePathPrefix,
+		readLivingRelationYQL,
+		table.NewQueryParameters(table.ValueParam("$values", relationsToSelectListValueParam(in))),
+		span,
+		rw.executor,
+	)
 }
 
 type coreDefinition interface {
@@ -463,6 +457,21 @@ func relationsToListValue(in []*core.RelationTuple, rev revisions.TimestampRevis
 			types.StructFieldValue(colCaveatName, types.NullableUTF8Value(caveatName)),
 			types.StructFieldValue(colCaveatContext, types.NullableJSONDocumentValueFromBytes(caveatContext)),
 			types.StructFieldValue(colCreatedAtUnixNano, types.Int64Value(rev.TimestampNanoSec())),
+		)
+	}
+	return types.ListValue(out...)
+}
+
+func relationsToSelectListValueParam(in []*core.RelationTuple) types.Value {
+	out := make([]types.Value, len(in))
+	for i := range in {
+		out[i] = types.TupleValue(
+			types.UTF8Value(in[i].GetResourceAndRelation().GetNamespace()),
+			types.UTF8Value(in[i].GetResourceAndRelation().GetObjectId()),
+			types.UTF8Value(in[i].GetResourceAndRelation().GetRelation()),
+			types.UTF8Value(in[i].GetSubject().GetNamespace()),
+			types.UTF8Value(in[i].GetSubject().GetObjectId()),
+			types.UTF8Value(in[i].GetSubject().GetRelation()),
 		)
 	}
 	return types.ListValue(out...)

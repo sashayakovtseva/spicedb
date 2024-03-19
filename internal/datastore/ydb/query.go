@@ -114,6 +114,28 @@ var (
 			colCreatedAtUnixNano,
 		).From("AS_TABLE($values)"),
 	).MustSql()
+
+	readLivingRelationYQL, _ = yq.Select(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		colCaveatContext,
+	).From(tableRelationTuple).
+		View(ixUqRelationLiving).
+		Where(livingObjectPredicate).
+		Where(fmt.Sprintf("(%s, %s, %s, %s, %s, %s) IN $values",
+			colNamespace,
+			colObjectID,
+			colRelation,
+			colUsersetNamespace,
+			colUsersetObjectID,
+			colUsersetRelation,
+		)).
+		MustSql()
 )
 
 type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
