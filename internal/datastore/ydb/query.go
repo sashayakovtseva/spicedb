@@ -100,6 +100,42 @@ var (
 		colCaveatContext,
 		colCreatedAtUnixNano,
 	)
+
+	insertAsTableRelationsYQL, _ = yq.Insert(tableRelationTuple).Select(
+		yq.Select(
+			colNamespace,
+			colObjectID,
+			colRelation,
+			colUsersetNamespace,
+			colUsersetObjectID,
+			colUsersetRelation,
+			colCaveatName,
+			colCaveatContext,
+			colCreatedAtUnixNano,
+		).From("AS_TABLE($values)"),
+	).MustSql()
+
+	readLivingRelationYQL, _ = yq.Select(
+		colNamespace,
+		colObjectID,
+		colRelation,
+		colUsersetNamespace,
+		colUsersetObjectID,
+		colUsersetRelation,
+		colCaveatName,
+		colCaveatContext,
+	).From(tableRelationTuple).
+		View(ixUqRelationLiving).
+		Where(livingObjectPredicate).
+		Where(fmt.Sprintf("(%s, %s, %s, %s, %s, %s) IN $values",
+			colNamespace,
+			colObjectID,
+			colRelation,
+			colUsersetNamespace,
+			colUsersetObjectID,
+			colUsersetRelation,
+		)).
+		MustSql()
 )
 
 type queryModifier func(sq.SelectBuilder) sq.SelectBuilder
@@ -267,7 +303,7 @@ func queryTuples(
 			var structuredCtx map[string]any
 			if caveatCtx != nil {
 				if err := json.Unmarshal(*caveatCtx, &structuredCtx); err != nil {
-					return nil, fmt.Errorf("failed to unmarhsla relation tuple caveat context: %w", err)
+					return nil, fmt.Errorf("failed to unmarshal relation tuple caveat context: %w", err)
 				}
 			}
 

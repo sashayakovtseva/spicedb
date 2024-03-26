@@ -1,5 +1,4 @@
 //go:build ci && docker
-// +build ci,docker
 
 package benchmark
 
@@ -18,6 +17,7 @@ import (
 	"github.com/authzed/spicedb/internal/datastore/mysql"
 	"github.com/authzed/spicedb/internal/datastore/postgres"
 	"github.com/authzed/spicedb/internal/datastore/spanner"
+	"github.com/authzed/spicedb/internal/datastore/ydb"
 	"github.com/authzed/spicedb/internal/testfixtures"
 	testdatastore "github.com/authzed/spicedb/internal/testserver/datastore"
 	"github.com/authzed/spicedb/internal/testserver/datastore/config"
@@ -47,6 +47,8 @@ var drivers = []struct {
 	{postgres.Engine, "", nil},
 	{crdb.Engine, "-overlap-static", []dsconfig.ConfigOption{dsconfig.WithOverlapStrategy("static")}},
 	{crdb.Engine, "-overlap-insecure", []dsconfig.ConfigOption{dsconfig.WithOverlapStrategy("insecure")}},
+	{ydb.Engine, "-uniqueness-check", []dsconfig.ConfigOption{dsconfig.WithYDBEnableUniquenessCheck(true)}},
+	{ydb.Engine, "-no-uniqueness-check", []dsconfig.ConfigOption{dsconfig.WithYDBEnableUniquenessCheck(false)}},
 	{mysql.Engine, "", nil},
 }
 

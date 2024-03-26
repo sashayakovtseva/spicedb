@@ -19,22 +19,35 @@ type ydbConfig struct {
 	gcInterval         time.Duration
 	gcMaxOperationTime time.Duration
 
+	sessionCountLimit       int
+	sessionKeepaliveTimeout time.Duration
+	sessionIdleThreshold    time.Duration
+
 	bulkLoadBatchSize int
 
-	gcEnabled             bool
+	enableGC              bool
 	enablePrometheusStats bool
+	enableUniquenessCheck bool
 }
 
 var defaultConfig = ydbConfig{
+	tablePathPrefix:             "",
+	certificatePath:             "",
 	watchBufferLength:           128,
 	watchBufferWriteTimeout:     time.Second,
+	followerReadDelay:           0,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
 	gcWindow:                    24 * time.Hour,
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
+	sessionCountLimit:           50,
+	sessionKeepaliveTimeout:     10 * time.Second,
+	sessionIdleThreshold:        60 * time.Second,
 	bulkLoadBatchSize:           1000,
-	gcEnabled:                   true,
+	enableGC:                    true,
+	enablePrometheusStats:       false,
+	enableUniquenessCheck:       true,
 }
 
 // Option provides the facility to configure how clients within the YDB
@@ -65,6 +78,27 @@ func WithCertificatePath(path string) Option {
 	return func(o *ydbConfig) { o.certificatePath = path }
 }
 
+// WithSessionCountLimit sets the maximum size of internal session pool in table.Client.
+//
+// This value defaults to 50.
+func WithSessionCountLimit(in int) Option {
+	return func(o *ydbConfig) { o.sessionCountLimit = in }
+}
+
+// WithSessionKeepaliveTimeout sets timeout of keep alive requests for session in table.Client.
+//
+// This value defaults to 10 seconds.
+func WithSessionKeepaliveTimeout(in time.Duration) Option {
+	return func(o *ydbConfig) { o.sessionKeepaliveTimeout = in }
+}
+
+// WithSessionIdleThreshold defines idle session lifetime threshold.
+//
+// This value defaults to 60 seconds.
+func WithSessionIdleThreshold(in time.Duration) Option {
+	return func(o *ydbConfig) { o.sessionIdleThreshold = in }
+}
+
 // GCWindow is the maximum age of a passed revision that will be considered
 // valid.
 //
@@ -80,11 +114,11 @@ func GCInterval(interval time.Duration) Option {
 	return func(o *ydbConfig) { o.gcInterval = interval }
 }
 
-// GCEnabled indicates whether garbage collection is enabled.
+// WithEnableGC indicates whether garbage collection is enabled.
 //
 // GC is enabled by default.
-func GCEnabled(isGCEnabled bool) Option {
-	return func(o *ydbConfig) { o.gcEnabled = isGCEnabled }
+func WithEnableGC(isGCEnabled bool) Option {
+	return func(o *ydbConfig) { o.enableGC = isGCEnabled }
 }
 
 // GCMaxOperationTime is the maximum operation time of a garbage collection pass before it times out.
@@ -143,6 +177,13 @@ func WatchBufferWriteTimeout(watchBufferWriteTimeout time.Duration) Option {
 // clients being used by the datastore are enabled.
 //
 // Prometheus metrics are disabled by default.
-func WithEnablePrometheusStats(enablePrometheusStats bool) Option {
-	return func(o *ydbConfig) { o.enablePrometheusStats = enablePrometheusStats }
+func WithEnablePrometheusStats(v bool) Option {
+	return func(o *ydbConfig) { o.enablePrometheusStats = v }
+}
+
+// WithEnableUniquenessCheck marks whether relation tuples will be checked against
+// unique index during CREATE operation. YDB doesn't support unique secondary indexes,
+// and since this check is quite expensive one may turn it off.
+func WithEnableUniquenessCheck(v bool) Option {
+	return func(o *ydbConfig) { o.enableUniquenessCheck = v }
 }

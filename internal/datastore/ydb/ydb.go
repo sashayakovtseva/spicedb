@@ -9,7 +9,6 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/prometheus/client_golang/prometheus"
-	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydbPrometheus "github.com/ydb-platform/ydb-go-sdk-prometheus"
 	ydbZerolog "github.com/ydb-platform/ydb-go-sdk-zerolog"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
@@ -76,7 +75,9 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 
 	ydbOpts := []ydb.Option{
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
-		ydbOtel.WithTraces(),
+		ydb.WithSessionPoolSizeLimit(config.sessionCountLimit),
+		ydb.WithSessionPoolIdleThreshold(config.sessionIdleThreshold),
+		ydb.WithSessionPoolKeepAliveTimeout(config.sessionKeepaliveTimeout),
 	}
 	if config.enablePrometheusStats {
 		ydbOpts = append(ydbOpts, ydbPrometheus.WithTraces(prometheus.DefaultRegisterer))
@@ -215,8 +216,9 @@ func (y *ydbDatastore) ReadWriteTx(
 				livingObjectModifier,
 				false,
 			),
-			bulkLoadBatchSize: y.config.bulkLoadBatchSize,
-			newRevision:       newRev,
+			bulkLoadBatchSize:     y.config.bulkLoadBatchSize,
+			newRevision:           newRev,
+			enableUniquenessCheck: y.config.enableUniquenessCheck,
 		}
 
 		return fn(ctx, rw)

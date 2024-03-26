@@ -65,6 +65,10 @@ func (c *Config) ToOption() ConfigOption {
 		to.SpannerMaxSessions = c.SpannerMaxSessions
 		to.YDBCertificatePath = c.YDBCertificatePath
 		to.YDBBulkLoadBatchSize = c.YDBBulkLoadBatchSize
+		to.YDBEnableUniquenessCheck = c.YDBEnableUniquenessCheck
+		to.YDBMaxSessions = c.YDBMaxSessions
+		to.YDBSessionKeepalive = c.YDBSessionKeepalive
+		to.YDBSessionIdleThreshold = c.YDBSessionIdleThreshold
 		to.WatchBufferLength = c.WatchBufferLength
 		to.WatchBufferWriteTimeout = c.WatchBufferWriteTimeout
 		to.MigrationPhase = c.MigrationPhase
@@ -108,6 +112,10 @@ func (c Config) DebugMap() map[string]any {
 	debugMap["SpannerMaxSessions"] = helpers.DebugValue(c.SpannerMaxSessions, false)
 	debugMap["YDBCertificatePath"] = helpers.DebugValue(c.YDBCertificatePath, false)
 	debugMap["YDBBulkLoadBatchSize"] = helpers.DebugValue(c.YDBBulkLoadBatchSize, false)
+	debugMap["YDBEnableUniquenessCheck"] = helpers.DebugValue(c.YDBEnableUniquenessCheck, false)
+	debugMap["YDBMaxSessions"] = helpers.DebugValue(c.YDBMaxSessions, false)
+	debugMap["YDBSessionKeepalive"] = helpers.DebugValue(c.YDBSessionKeepalive, false)
+	debugMap["YDBSessionIdleThreshold"] = helpers.DebugValue(c.YDBSessionIdleThreshold, false)
 	debugMap["WatchBufferLength"] = helpers.DebugValue(c.WatchBufferLength, false)
 	debugMap["WatchBufferWriteTimeout"] = helpers.DebugValue(c.WatchBufferWriteTimeout, false)
 	debugMap["MigrationPhase"] = helpers.DebugValue(c.MigrationPhase, false)
@@ -379,6 +387,34 @@ func WithYDBCertificatePath(yDBCertificatePath string) ConfigOption {
 func WithYDBBulkLoadBatchSize(yDBBulkLoadBatchSize int) ConfigOption {
 	return func(c *Config) {
 		c.YDBBulkLoadBatchSize = yDBBulkLoadBatchSize
+	}
+}
+
+// WithYDBEnableUniquenessCheck returns an option that can set YDBEnableUniquenessCheck on a Config
+func WithYDBEnableUniquenessCheck(yDBEnableUniquenessCheck bool) ConfigOption {
+	return func(c *Config) {
+		c.YDBEnableUniquenessCheck = yDBEnableUniquenessCheck
+	}
+}
+
+// WithYDBMaxSessions returns an option that can set YDBMaxSessions on a Config
+func WithYDBMaxSessions(yDBMaxSessions int) ConfigOption {
+	return func(c *Config) {
+		c.YDBMaxSessions = yDBMaxSessions
+	}
+}
+
+// WithYDBSessionKeepalive returns an option that can set YDBSessionKeepalive on a Config
+func WithYDBSessionKeepalive(yDBSessionKeepalive time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.YDBSessionKeepalive = yDBSessionKeepalive
+	}
+}
+
+// WithYDBSessionIdleThreshold returns an option that can set YDBSessionIdleThreshold on a Config
+func WithYDBSessionIdleThreshold(yDBSessionIdleThreshold time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.YDBSessionIdleThreshold = yDBSessionIdleThreshold
 	}
 }
 
