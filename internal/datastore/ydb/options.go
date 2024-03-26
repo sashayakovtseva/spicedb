@@ -19,9 +19,8 @@ type ydbConfig struct {
 	gcInterval         time.Duration
 	gcMaxOperationTime time.Duration
 
-	sessionCountLimit       int
-	sessionKeepaliveTimeout time.Duration
-	sessionIdleThreshold    time.Duration
+	sessionCountLimit    int
+	sessionIdleThreshold time.Duration
 
 	bulkLoadBatchSize int
 
@@ -42,8 +41,7 @@ var defaultConfig = ydbConfig{
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
 	sessionCountLimit:           50,
-	sessionKeepaliveTimeout:     10 * time.Second,
-	sessionIdleThreshold:        60 * time.Second,
+	sessionIdleThreshold:        5 * time.Minute,
 	bulkLoadBatchSize:           1000,
 	enableGC:                    true,
 	enablePrometheusStats:       false,
@@ -85,16 +83,9 @@ func WithSessionCountLimit(in int) Option {
 	return func(o *ydbConfig) { o.sessionCountLimit = in }
 }
 
-// WithSessionKeepaliveTimeout sets timeout of keep alive requests for session in table.Client.
-//
-// This value defaults to 10 seconds.
-func WithSessionKeepaliveTimeout(in time.Duration) Option {
-	return func(o *ydbConfig) { o.sessionKeepaliveTimeout = in }
-}
-
 // WithSessionIdleThreshold defines idle session lifetime threshold.
 //
-// This value defaults to 60 seconds.
+// This value defaults to 5 minutes.
 func WithSessionIdleThreshold(in time.Duration) Option {
 	return func(o *ydbConfig) { o.sessionIdleThreshold = in }
 }

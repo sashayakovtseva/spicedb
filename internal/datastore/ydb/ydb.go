@@ -77,7 +77,6 @@ func newYDBDatastore(ctx context.Context, dsn string, opts ...Option) (*ydbDatas
 		ydbZerolog.WithTraces(&log.Logger, trace.DatabaseSQLEvents),
 		ydb.WithSessionPoolSizeLimit(config.sessionCountLimit),
 		ydb.WithSessionPoolIdleThreshold(config.sessionIdleThreshold),
-		ydb.WithSessionPoolKeepAliveTimeout(config.sessionKeepaliveTimeout),
 	}
 	if config.enablePrometheusStats {
 		ydbOpts = append(ydbOpts, ydbPrometheus.WithTraces(prometheus.DefaultRegisterer))

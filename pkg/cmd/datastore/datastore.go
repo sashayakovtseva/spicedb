@@ -145,7 +145,6 @@ type Config struct {
 	YDBBulkLoadBatchSize     int           `debugmap:"visible"`
 	YDBEnableUniquenessCheck bool          `debugmap:"visible"`
 	YDBMaxSessions           int           `debugmap:"visible"`
-	YDBSessionKeepalive      time.Duration `debugmap:"visible"`
 	YDBSessionIdleThreshold  time.Duration `debugmap:"visible"`
 
 	// Internal
@@ -227,7 +226,6 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	flagSet.StringVar(&opts.YDBCertificatePath, flagName("datastore-certificate-path"), defaults.YDBCertificatePath, "filepath to a valid certificate used to connect to a datastore (ydb driver only)")
 	flagSet.BoolVar(&opts.YDBEnableUniquenessCheck, flagName("datastore-ydb-enable-uniqueness-check"), defaults.YDBEnableUniquenessCheck, "whether to check tuples against unique index during CREATE operation (ydb driver only)")
 	flagSet.IntVar(&opts.YDBMaxSessions, flagName("datastore-ydb-max-sessions"), defaults.YDBMaxSessions, "maximum number of open sessions (ydb driver only)")
-	flagSet.DurationVar(&opts.YDBSessionKeepalive, flagName("datastore-ydb-session-keepalive-period"), defaults.YDBSessionKeepalive, "timeout between session keepalive messages (ydb driver only)")
 	flagSet.DurationVar(&opts.YDBSessionIdleThreshold, flagName("datastore-ydb-session-idle-threshold"), defaults.YDBSessionIdleThreshold, "maximum duration ann idle session can be alive (ydb driver only)")
 
 	// disabling stats is only for tests
@@ -287,8 +285,7 @@ func DefaultDatastoreConfig() *Config {
 		YDBBulkLoadBatchSize:           1000,
 		YDBEnableUniquenessCheck:       true,
 		YDBMaxSessions:                 50,
-		YDBSessionKeepalive:            10 * time.Second,
-		YDBSessionIdleThreshold:        60 * time.Second,
+		YDBSessionIdleThreshold:        5 * time.Minute,
 		WatchBufferLength:              1024,
 		WatchBufferWriteTimeout:        1 * time.Second,
 		MigrationPhase:                 "",
@@ -457,7 +454,6 @@ func newYDBDatastore(ctx context.Context, config Config) (datastore.Datastore, e
 		ydb.WithCertificatePath(config.YDBCertificatePath),
 		ydb.WithEnableUniquenessCheck(config.YDBEnableUniquenessCheck),
 		ydb.WithSessionCountLimit(config.YDBMaxSessions),
-		ydb.WithSessionKeepaliveTimeout(config.YDBSessionKeepalive),
 		ydb.WithSessionIdleThreshold(config.YDBSessionIdleThreshold),
 	}
 	return ydb.NewYDBDatastore(ctx, config.URI, opts...)
