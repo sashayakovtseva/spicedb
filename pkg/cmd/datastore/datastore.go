@@ -141,9 +141,12 @@ type Config struct {
 	SpannerMaxSessions     uint64 `debugmap:"visible"`
 
 	// YDB
-	YDBCertificatePath       string `debugmap:"visible"`
-	YDBBulkLoadBatchSize     int    `debugmap:"visible"`
-	YDBEnableUniquenessCheck bool   `debugmap:"visible"`
+	YDBCertificatePath       string        `debugmap:"visible"`
+	YDBBulkLoadBatchSize     int           `debugmap:"visible"`
+	YDBEnableUniquenessCheck bool          `debugmap:"visible"`
+	YDBMaxSessions           int           `debugmap:"visible"`
+	YDBSessionKeepalive      time.Duration `debugmap:"visible"`
+	YDBSessionIdleThreshold  time.Duration `debugmap:"visible"`
 
 	// Internal
 	WatchBufferLength       uint16        `debugmap:"visible"`
@@ -223,6 +226,9 @@ func RegisterDatastoreFlagsWithPrefix(flagSet *pflag.FlagSet, prefix string, opt
 	flagSet.IntVar(&opts.YDBBulkLoadBatchSize, flagName("datastore-bulk-load-size"), defaults.YDBBulkLoadBatchSize, "number of rows BulkLoad will process in a single batch (ydb driver only)")
 	flagSet.StringVar(&opts.YDBCertificatePath, flagName("datastore-certificate-path"), defaults.YDBCertificatePath, "filepath to a valid certificate used to connect to a datastore (ydb driver only)")
 	flagSet.BoolVar(&opts.YDBEnableUniquenessCheck, flagName("datastore-ydb-enable-uniqueness-check"), defaults.YDBEnableUniquenessCheck, "whether to check tuples against unique index during CREATE operation (ydb driver only)")
+	flagSet.IntVar(&opts.YDBMaxSessions, flagName("datastore-ydb-max-sessions"), defaults.YDBMaxSessions, "maximum number of open sessions (ydb driver only)")
+	flagSet.DurationVar(&opts.YDBSessionKeepalive, flagName("datastore-ydb-session-keepalive-period"), defaults.YDBSessionKeepalive, "timeout between session keepalive messages (ydb driver only)")
+	flagSet.DurationVar(&opts.YDBSessionIdleThreshold, flagName("datastore-ydb-session-idle-threshold"), defaults.YDBSessionIdleThreshold, "maximum duration ann idle session can be alive (ydb driver only)")
 
 	// disabling stats is only for tests
 	flagSet.BoolVar(&opts.DisableStats, flagName("datastore-disable-stats"), false, "disable recording relationship counts to the stats table")
@@ -280,6 +286,9 @@ func DefaultDatastoreConfig() *Config {
 		YDBCertificatePath:             "",
 		YDBBulkLoadBatchSize:           1000,
 		YDBEnableUniquenessCheck:       true,
+		YDBMaxSessions:                 50,
+		YDBSessionKeepalive:            10 * time.Second,
+		YDBSessionIdleThreshold:        60 * time.Second,
 		WatchBufferLength:              1024,
 		WatchBufferWriteTimeout:        1 * time.Second,
 		MigrationPhase:                 "",
@@ -447,6 +456,9 @@ func newYDBDatastore(ctx context.Context, config Config) (datastore.Datastore, e
 		ydb.WithEnablePrometheusStats(config.EnableDatastoreMetrics),
 		ydb.WithCertificatePath(config.YDBCertificatePath),
 		ydb.WithEnableUniquenessCheck(config.YDBEnableUniquenessCheck),
+		ydb.WithSessionCountLimit(config.YDBMaxSessions),
+		ydb.WithSessionKeepaliveTimeout(config.YDBSessionKeepalive),
+		ydb.WithSessionIdleThreshold(config.YDBSessionIdleThreshold),
 	}
 	return ydb.NewYDBDatastore(ctx, config.URI, opts...)
 }

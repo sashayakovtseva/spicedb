@@ -19,6 +19,10 @@ type ydbConfig struct {
 	gcInterval         time.Duration
 	gcMaxOperationTime time.Duration
 
+	sessionCountLimit       int
+	sessionKeepaliveTimeout time.Duration
+	sessionIdleThreshold    time.Duration
+
 	bulkLoadBatchSize int
 
 	enableGC              bool
@@ -27,15 +31,22 @@ type ydbConfig struct {
 }
 
 var defaultConfig = ydbConfig{
+	tablePathPrefix:             "",
+	certificatePath:             "",
 	watchBufferLength:           128,
 	watchBufferWriteTimeout:     time.Second,
+	followerReadDelay:           0,
 	revisionQuantization:        5 * time.Second,
 	maxRevisionStalenessPercent: 0.1,
 	gcWindow:                    24 * time.Hour,
 	gcInterval:                  3 * time.Minute,
 	gcMaxOperationTime:          time.Minute,
+	sessionCountLimit:           50,
+	sessionKeepaliveTimeout:     10 * time.Second,
+	sessionIdleThreshold:        60 * time.Second,
 	bulkLoadBatchSize:           1000,
 	enableGC:                    true,
+	enablePrometheusStats:       false,
 	enableUniquenessCheck:       true,
 }
 
@@ -65,6 +76,27 @@ func WithTablePathPrefix(prefix string) Option {
 // Default is empty.
 func WithCertificatePath(path string) Option {
 	return func(o *ydbConfig) { o.certificatePath = path }
+}
+
+// WithSessionCountLimit sets the maximum size of internal session pool in table.Client.
+//
+// This value defaults to 50.
+func WithSessionCountLimit(in int) Option {
+	return func(o *ydbConfig) { o.sessionCountLimit = in }
+}
+
+// WithSessionKeepaliveTimeout sets timeout of keep alive requests for session in table.Client.
+//
+// This value defaults to 10 seconds.
+func WithSessionKeepaliveTimeout(in time.Duration) Option {
+	return func(o *ydbConfig) { o.sessionKeepaliveTimeout = in }
+}
+
+// WithSessionIdleThreshold defines idle session lifetime threshold.
+//
+// This value defaults to 60 seconds.
+func WithSessionIdleThreshold(in time.Duration) Option {
+	return func(o *ydbConfig) { o.sessionIdleThreshold = in }
 }
 
 // GCWindow is the maximum age of a passed revision that will be considered
