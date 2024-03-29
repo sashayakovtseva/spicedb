@@ -50,9 +50,12 @@ CREATE TABLE namespace_config (
 	INDEX uq_namespace_living GLOBAL SYNC ON (deleted_at_unix_nano, namespace) COVER (serialized_config)
 )
 WITH (
-    AUTO_PARTITIONING_BY_SIZE = DISABLED,
+    AUTO_PARTITIONING_BY_SIZE = ENABLED,
+    AUTO_PARTITIONING_PARTITION_SIZE_MB = 1024,
     AUTO_PARTITIONING_BY_LOAD = ENABLED,
-    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 3
+    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 4,
+    AUTO_PARTITIONING_MAX_PARTITIONS_COUNT = 1024,
+    KEY_BLOOM_FILTER = ENABLED
 );`
 
 	// ideally PK should be (name, deleted_at_unix_nano), but since deleted_at_unix_nano is
@@ -69,9 +72,12 @@ CREATE TABLE caveat (
 	INDEX uq_caveat_living GLOBAL SYNC ON (deleted_at_unix_nano, name) COVER (definition)
 )
 WITH (
-    AUTO_PARTITIONING_BY_SIZE = DISABLED,
+    AUTO_PARTITIONING_BY_SIZE = ENABLED,
+    AUTO_PARTITIONING_PARTITION_SIZE_MB = 1024,
     AUTO_PARTITIONING_BY_LOAD = ENABLED,
-    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 3
+    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 4,
+    AUTO_PARTITIONING_MAX_PARTITIONS_COUNT = 1024,
+    KEY_BLOOM_FILTER = ENABLED
 );`
 
 	// todo use correct indexes.
@@ -88,16 +94,15 @@ CREATE TABLE relation_tuple (
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, created_at_unix_nano),
-	INDEX uq_relation_tuple_living GLOBAL SYNC ON (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, deleted_at_unix_nano),
-	INDEX ix_relation_tuple_by_subject GLOBAL SYNC ON (userset_object_id, userset_namespace, userset_relation, namespace, relation),
-	INDEX ix_relation_tuple_by_subject_relation GLOBAL SYNC ON (userset_namespace, userset_relation, namespace, relation),
-	INDEX ix_relation_tuple_alive_by_resource_rel_subject_covering GLOBAL SYNC ON (namespace, relation, userset_namespace) COVER (caveat_name, caveat_context),
-	INDEX ix_gc_index GLOBAL SYNC ON (deleted_at_unix_nano)
+	INDEX uq_relation_tuple_living GLOBAL SYNC ON (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, deleted_at_unix_nano)
 )
 WITH (
-    AUTO_PARTITIONING_BY_SIZE = DISABLED,
+    AUTO_PARTITIONING_BY_SIZE = ENABLED,
+    AUTO_PARTITIONING_PARTITION_SIZE_MB = 1024,
     AUTO_PARTITIONING_BY_LOAD = ENABLED,
-    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 3
+    AUTO_PARTITIONING_MIN_PARTITIONS_COUNT = 4,
+    AUTO_PARTITIONING_MAX_PARTITIONS_COUNT = 1024,
+    KEY_BLOOM_FILTER = ENABLED
 );`
 
 	createNamespaceConfigChangefeed = `
