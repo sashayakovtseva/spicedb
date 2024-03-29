@@ -94,7 +94,7 @@ CREATE TABLE relation_tuple (
 	created_at_unix_nano Int64 NOT NULL,
 	deleted_at_unix_nano Int64,
 	PRIMARY KEY (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, created_at_unix_nano),
-	INDEX uq_relation_tuple_living GLOBAL SYNC ON (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, deleted_at_unix_nano),
+	INDEX uq_relation_tuple_living GLOBAL SYNC ON (namespace, object_id, relation, userset_namespace, userset_object_id, userset_relation, deleted_at_unix_nano)
 )
 WITH (
     AUTO_PARTITIONING_BY_SIZE = ENABLED,
